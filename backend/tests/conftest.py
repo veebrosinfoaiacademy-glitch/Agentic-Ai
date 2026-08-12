@@ -7,12 +7,14 @@ the repository without a MongoDB Atlas account.
 
 import io
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from pymongo.errors import ConnectionFailure
 
 from app.config import settings
 from app.database import mongodb
+from app.schemas.auth_schemas import UserData
 from app.services.groq_service import GroqResult, groq_service
 from app.utils.errors import AppError
 
@@ -413,6 +415,31 @@ def failing_users(monkeypatch: pytest.MonkeyPatch) -> FakeUsersCollection:
         "app.services.auth_service.get_users_collection", lambda: collection
     )
     return collection
+
+
+@pytest.fixture
+def authenticated() -> Iterator[UserData]:
+    """Sign the test client in for modules that test behaviour, not auth.
+
+    Phase 10 protects every agent and upload route. Rather than threading a
+    real token through several hundred existing assertions, this overrides
+    the `require_user` dependency so those tests keep exercising what they
+    were written for.
+
+    Deliberately NOT autouse: the route-protection tests must see the real
+    dependency, and they do.
+    """
+    from app.dependencies.auth import require_user
+    from app.main import app
+
+    test_user = UserData(
+        id="507f1f77bcf86cd799439011",
+        email="fixture@example.com",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    app.dependency_overrides[require_user] = lambda: test_user
+    yield test_user
+    app.dependency_overrides.pop(require_user, None)
 
 
 @pytest.fixture

@@ -71,9 +71,11 @@ def test_malformed_json_body_names_the_body_not_an_offset() -> None:
 
     Passing that through as `field: "103"` would be meaningless to a client.
     """
+    # A public POST endpoint, so the malformed body is what fails —
+    # not authentication, which would otherwise reject the request first.
     response = client.post(
-        "/api/ai/test",
-        content='{"prompt": "unterminated',
+        "/api/auth/login",
+        content='{"email": "unterminated',
         headers={"Content-Type": "application/json"},
     )
 

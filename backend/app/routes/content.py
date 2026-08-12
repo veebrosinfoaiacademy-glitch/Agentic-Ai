@@ -9,6 +9,7 @@ and the Phase 2 handlers turn them into the standard error envelope.
 from fastapi import APIRouter
 
 from app.agents.content_agent import AgentResult, content_agent
+from app.dependencies.auth import CurrentUser
 from app.schemas.common_schemas import SuccessResponse, success
 from app.schemas.content_schemas import (
     AudienceRequest,
@@ -42,7 +43,7 @@ def _content_payload(result: AgentResult) -> dict:
         "and length."
     ),
 )
-def generate_content(request: GenerateRequest) -> dict:
+def generate_content(request: GenerateRequest, user: CurrentUser) -> dict:
     result = content_agent.generate(
         topic=request.topic,
         content_type=request.content_type,
@@ -63,7 +64,7 @@ def generate_content(request: GenerateRequest) -> dict:
         "or bullet points. Uses only information present in the source."
     ),
 )
-def summarize_content(request: SummarizeRequest) -> dict:
+def summarize_content(request: SummarizeRequest, user: CurrentUser) -> dict:
     result = content_agent.summarize(text=request.text, summary_type=request.summary_type)
     return success(data=_content_payload(result), message="Content summarized successfully")
 
@@ -74,7 +75,7 @@ def summarize_content(request: SummarizeRequest) -> dict:
     summary="Rewrite text following instructions",
     description="Improves the source text while preserving its meaning.",
 )
-def rewrite_content(request: RewriteRequest) -> dict:
+def rewrite_content(request: RewriteRequest, user: CurrentUser) -> dict:
     result = content_agent.rewrite(text=request.text, instructions=request.instructions)
     return success(data=_content_payload(result), message="Content rewritten successfully")
 
@@ -85,7 +86,7 @@ def rewrite_content(request: RewriteRequest) -> dict:
     summary="Change the tone of text",
     description="Rewrites the source in a different tone. Facts are unchanged.",
 )
-def transform_tone(request: ToneRequest) -> dict:
+def transform_tone(request: ToneRequest, user: CurrentUser) -> dict:
     result = content_agent.transform_tone(text=request.text, tone=request.tone)
     return success(data=_content_payload(result), message="Tone transformed successfully")
 
@@ -99,7 +100,7 @@ def transform_tone(request: ToneRequest) -> dict:
         "preserving the underlying facts."
     ),
 )
-def adapt_audience(request: AudienceRequest) -> dict:
+def adapt_audience(request: AudienceRequest, user: CurrentUser) -> dict:
     result = content_agent.adapt_audience(text=request.text, audience=request.audience)
     return success(data=_content_payload(result), message="Content adapted successfully")
 
@@ -110,7 +111,7 @@ def adapt_audience(request: AudienceRequest) -> dict:
     summary="Reformat text into a different structure",
     description="Restructures the source into the requested format.",
 )
-def transform_format(request: FormatRequest) -> dict:
+def transform_format(request: FormatRequest, user: CurrentUser) -> dict:
     result = content_agent.transform_format(text=request.text, content_format=request.format)
     return success(data=_content_payload(result), message="Content reformatted successfully")
 
@@ -124,7 +125,7 @@ def transform_format(request: FormatRequest) -> dict:
         "Model output is parsed and validated before it is returned."
     ),
 )
-def extract_information(request: ExtractRequest) -> dict:
+def extract_information(request: ExtractRequest, user: CurrentUser) -> dict:
     result = content_agent.extract_information(text=request.text)
 
     # structured is always populated here — extract_information either sets

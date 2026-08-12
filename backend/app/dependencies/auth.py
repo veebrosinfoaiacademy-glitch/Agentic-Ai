@@ -10,6 +10,7 @@ document, and Swagger shows the padlock plus an Authorize button.
 """
 
 import logging
+from typing import Annotated
 
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -69,3 +70,27 @@ def get_current_user(
         )
 
     return auth_service.get_user_by_id(subject)
+
+
+def require_user(
+    request: Request, user: UserData = Depends(get_current_user)
+) -> UserData:
+    """Protect a route and record who called it.
+
+    A thin wrapper over `get_current_user`, not a second implementation. It
+    exists for two reasons:
+
+    * one audit line per authenticated request, naming the user by database
+      id — never the token, never the Authorization header;
+    * a single place for later phases to add quotas, usage tracking or roles
+      without touching fifteen route handlers.
+    """
+    logger.info(
+        "Authorised %s %s for user %s", request.method, request.url.path, user.id
+    )
+    return user
+
+
+# Route signatures stay readable: `user: CurrentUser` rather than a
+# `= Depends(...)` default on every handler.
+CurrentUser = Annotated[UserData, Depends(require_user)]

@@ -14,6 +14,11 @@ from tests.conftest import GenerateRecorder
 
 client = TestClient(app)
 
+# Phase 10 protects these routes. These tests cover behaviour, not
+# authentication, so they run as a signed-in user. Protection itself is
+# verified in test_route_protection.py against the real dependency.
+pytestmark = pytest.mark.usefixtures("authenticated")
+
 SOURCE = "Acme Corp released Widget 3 in March 2024. It cut processing time by 40%."
 
 VALID_GENERATE = {

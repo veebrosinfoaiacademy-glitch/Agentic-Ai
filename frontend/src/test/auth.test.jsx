@@ -80,8 +80,9 @@ describe('Login page', () => {
 
   it('disables the submit button while signing in', async () => {
     const user = userEvent.setup()
-    let resolveLogin
-    authApi.login.mockReturnValue(new Promise((resolve) => { resolveLogin = resolve }))
+    // Never settles, so the button stays in its loading state. Resolving it
+    // after the assertions would update state outside act() and warn.
+    authApi.login.mockReturnValue(new Promise(() => {}))
 
     renderApp('/login')
     await user.type(await screen.findByLabelText(/email/i), 'user@example.com')
@@ -90,8 +91,6 @@ describe('Login page', () => {
 
     const button = screen.getByRole('button', { name: /signing in/i })
     expect(button).toBeDisabled()
-
-    resolveLogin({ access_token: 'x', expires_in: 1 })
   })
 })
 

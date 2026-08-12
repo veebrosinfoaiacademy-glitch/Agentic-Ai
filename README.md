@@ -102,6 +102,53 @@ Groq and MongoDB.
 
 ---
 
+## Authentication
+
+Every AI and document-processing endpoint requires a signed-in user. Identity
+comes from the JWT and nothing else — a `user_id` in a request body is ignored,
+and no request schema accepts one.
+
+**Public** (no token):
+
+| Endpoint | Why |
+|---|---|
+| `GET /api/health` | Liveness probe |
+| `POST /api/auth/register` | Otherwise nobody could sign up |
+| `POST /api/auth/login` | Otherwise nobody could sign in |
+| `GET /api/documents/supported-types` | Global server configuration, no user data |
+
+**Protected** (`Authorization: Bearer <token>`): `GET /api/auth/me`, all 7
+`/api/content/*`, all 7 `/api/developer/*`, `POST /api/documents/upload`, and
+`POST /api/ai/test`.
+
+Authentication is resolved **before** the request reaches Groq, the document
+extractor or any user-owned database read, so an anonymous request can never
+cause provider spend.
+
+### Testing a protected endpoint
+
+```bash
+# 1. Get a token
+curl -s -X POST http://localhost:8000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"your-password"}'
+
+# 2. Send it as a Bearer token
+curl -s -X POST http://localhost:8000/api/content/summarize \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <token>' \
+  -d '{"text":"Some source text.","summary_type":"short"}'
+```
+
+Or use Swagger at `/docs` → **Authorize** → paste the token → protected routes
+become callable.
+
+Tokens remain **stateless**: no refresh tokens, no blacklist, no session
+storage. Signing out means the client discarding its token, and a token stops
+working when it expires or its account is deleted.
+
+---
+
 ## Progress
 
 - [x] **Phase 1** — Project setup
@@ -113,7 +160,7 @@ Groq and MongoDB.
 - [x] **Phase 7** — Document upload and extraction (txt, md, csv, pdf, docx)
 - [x] **Phase 8** — Authentication (Argon2id + JWT), verified against live Atlas
 - [x] **Phase 9** — React dashboard, agent interfaces, auth UI (45 frontend tests)
-- [ ] Phase 10 — Frontend/backend integration
+- [x] **Phase 10** — Protected AI/document APIs, JWT-derived identity
 - [ ] Phase 11 — Conversation history
 - [ ] Phase 12 — Testing and error handling
 - [ ] Phase 13 — Deployment

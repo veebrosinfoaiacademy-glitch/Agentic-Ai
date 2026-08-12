@@ -276,41 +276,44 @@ def test_openapi_never_exposes_the_signing_secret(jwt_secret: str) -> None:
     assert jwt_secret not in client.get("/openapi.json").text
 
 
-# --- Existing endpoints stay unprotected ------------------------------------
+# --- Which endpoints stay public (Phase 10 changed this) --------------------
 
 
-def test_phase_2_to_7_endpoints_still_work_without_a_token(
-    recorded_generate,
-) -> None:
-    """Only /api/auth/me is protected in Phase 8."""
+def test_public_endpoints_still_work_without_a_token() -> None:
+    """Health, register, login and supported-types remain anonymous.
+
+    Phase 8 asserted the agent routes were open too. Phase 10 deliberately
+    closed them, so that half of the assertion moved to
+    test_route_protection.py rather than being deleted.
+    """
     assert client.get("/api/health").status_code == 200
     assert client.get("/api/documents/supported-types").status_code == 200
 
-    recorded_generate.content = "Some content."
-    assert (
-        client.post(
-            "/api/content/summarize",
-            json={"text": "Some source text.", "summary_type": "short"},
-        ).status_code
-        == 200
-    )
+    # Registration and login must stay reachable, or nobody could ever sign in.
+    schema = client.get("/openapi.json").json()
+    assert "security" not in schema["paths"][REGISTER]["post"]
+    assert "security" not in schema["paths"][LOGIN]["post"]
 
-    recorded_generate.content = "{}"
-    assert (
-        client.post(
-            "/api/developer/explain",
-            json={"language": "python", "code": "def f(): pass"},
-        ).status_code
-        == 200
-    )
 
-    assert (
-        client.post(
-            "/api/documents/upload",
-            files={"file": ("a.txt", b"hello there", "text/plain")},
-        ).status_code
-        == 200
+def test_agent_and_upload_endpoints_now_require_a_token(
+    recorded_generate,
+) -> None:
+    """The Phase 10 contract change, asserted at the HTTP boundary."""
+    anonymous = [
+        ("post", "/api/content/summarize", {"text": "x", "summary_type": "short"}),
+        ("post", "/api/developer/explain", {"language": "python", "code": "x = 1"}),
+        ("post", "/api/ai/test", {"prompt": "hello"}),
+    ]
+    for method, path, payload in anonymous:
+        response = getattr(client, method)(path, json=payload)
+        assert response.status_code == 401, path
+        assert response.json()["error"]["code"] == "TOKEN_MISSING"
+
+    upload = client.post(
+        "/api/documents/upload",
+        files={"file": ("a.txt", b"hello there", "text/plain")},
     )
+    assert upload.status_code == 401
 
 
 # --- SECURITY ---------------------------------------------------------------

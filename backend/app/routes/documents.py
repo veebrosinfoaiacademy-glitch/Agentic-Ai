@@ -10,6 +10,7 @@ import logging
 from fastapi import APIRouter, File, UploadFile
 
 from app.config import settings
+from app.dependencies.auth import CurrentUser
 from app.schemas.common_schemas import SuccessResponse, success
 from app.schemas.document_schemas import DocumentType
 from app.services.document_service import document_service
@@ -39,12 +40,17 @@ router = APIRouter(tags=["Documents"])
     },
 )
 async def upload_document(
+    user: CurrentUser,
     file: UploadFile = File(
         ...,
         description="Document to process (.txt, .md, .csv, .pdf, .docx).",
     ),
 ) -> dict:
-    """Extract text from an uploaded document."""
+    """Extract text from an uploaded document.
+
+    Authentication is resolved before the file is read, so an anonymous
+    request never reaches the extractor.
+    """
     result = await document_service.process_upload(file)
 
     return success(

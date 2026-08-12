@@ -16,6 +16,11 @@ from tests.conftest import make_docx, make_pdf, make_pdf_without_text
 
 client = TestClient(app)
 
+# Phase 10 protects these routes. These tests cover behaviour, not
+# authentication, so they run as a signed-in user. Protection itself is
+# verified in test_route_protection.py against the real dependency.
+pytestmark = pytest.mark.usefixtures("authenticated")
+
 UPLOAD = "/api/documents/upload"
 
 DOCX_MIME = (
