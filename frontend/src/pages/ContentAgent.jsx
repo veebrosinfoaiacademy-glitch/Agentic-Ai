@@ -124,7 +124,7 @@ export default function ContentAgent() {
       setResult(response)
     } catch (caught) {
       setFieldErrors(caught.fieldErrors ?? {})
-      setError(friendlyError(caught))
+      setError({ text: friendlyError(caught), requestId: caught.requestId })
     } finally {
       setIsSubmitting(false)
     }
@@ -152,7 +152,11 @@ export default function ContentAgent() {
 
           <TaskFields task={task} form={form} update={update} fieldErrors={fieldErrors} />
 
-          {error && <Alert variant="error">{error}</Alert>}
+          {error && (
+            <Alert variant="error" requestId={error.requestId}>
+              {error.text}
+            </Alert>
+          )}
 
           <div className="flex flex-wrap gap-3">
             <Button type="submit" loading={isSubmitting}>

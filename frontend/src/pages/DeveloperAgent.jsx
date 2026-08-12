@@ -114,7 +114,7 @@ export default function DeveloperAgent() {
       setResult(await runTask(task, form, reviewFocus))
     } catch (caught) {
       setFieldErrors(caught.fieldErrors ?? {})
-      setError(friendlyError(caught))
+      setError({ text: friendlyError(caught), requestId: caught.requestId })
     } finally {
       setIsSubmitting(false)
     }
@@ -254,7 +254,11 @@ export default function DeveloperAgent() {
             />
           )}
 
-          {error && <Alert variant="error">{error}</Alert>}
+          {error && (
+            <Alert variant="error" requestId={error.requestId}>
+              {error.text}
+            </Alert>
+          )}
 
           <div className="flex flex-wrap gap-3">
             <Button type="submit" loading={isSubmitting}>

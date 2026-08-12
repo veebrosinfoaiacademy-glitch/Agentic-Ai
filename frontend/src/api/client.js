@@ -62,12 +62,21 @@ api.interceptors.request.use((config) => {
  * so we never fall back to reading FastAPI's default `detail` field.
  */
 export class ApiError extends Error {
-  constructor({ message, code, details, status }) {
+  constructor({ message, code, details, status, requestId }) {
     super(message)
     this.name = 'ApiError'
     this.code = code ?? 'UNKNOWN_ERROR'
     this.details = details ?? null
     this.status = status ?? 0
+    // The server's correlation id, from the X-Request-ID response header.
+    // Quoting it in a support request finds the exact server log lines.
+    this.requestId = requestId ?? null
+  }
+
+  /** Seconds to wait before retrying, when the server said so. */
+  get retryAfterSeconds() {
+    const fromBody = this.details?.retry_after_seconds
+    return typeof fromBody === 'number' && fromBody > 0 ? fromBody : null
   }
 
   /** Validation problems as { fieldName: message }, for inline form errors. */
@@ -86,6 +95,8 @@ api.interceptors.response.use(
   (error) => {
     const status = error.response?.status ?? 0
     const body = error.response?.data
+    // Header names are case-insensitive in Axios's normalised headers.
+    const requestId = error.response?.headers?.['x-request-id'] ?? null
 
     if (status === 401) {
       // Clear the session once. No retry — a stale token will never
@@ -100,6 +111,7 @@ api.interceptors.response.use(
           code: body.error.code,
           details: body.error.details,
           status,
+          requestId,
         }),
       )
     }
@@ -113,6 +125,7 @@ api.interceptors.response.use(
             : 'Something went wrong. Please try again.',
         code: status === 0 ? 'NETWORK_ERROR' : 'UNEXPECTED_ERROR',
         status,
+        requestId,
       }),
     )
   },

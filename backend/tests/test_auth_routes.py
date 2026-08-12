@@ -328,6 +328,11 @@ def test_auth_source_has_no_execution_primitives() -> None:
         app_dir / "dependencies" / "auth.py",
         app_dir / "routes" / "auth.py",
         app_dir / "schemas" / "auth_schemas.py",
+        # Phase 12 modules
+        app_dir / "dependencies" / "quota.py",
+        app_dir / "services" / "usage_service.py",
+        app_dir / "utils" / "request_context.py",
+        app_dir / "routes" / "usage.py",
     ]
 
     forbidden_calls = {"exec", "eval", "compile", "__import__"}

@@ -38,6 +38,8 @@ logger = logging.getLogger("app.database")
 USERS_COLLECTION = "users"
 CONVERSATIONS_COLLECTION = "conversations"
 MESSAGES_COLLECTION = "messages"
+USAGE_COLLECTION = "usage"
+DOCUMENTS_COLLECTION = "documents"
 
 # How long to wait for Atlas before giving up. The PyMongo default is 30s,
 # which would make a misconfigured cluster look like a hung server.
@@ -206,6 +208,28 @@ class MongoDB:
                 [("user_id", 1), ("conversation_id", 1)], name="user_conversation"
             )
 
+            # One document per (user, window kind, window start). The unique
+            # index is what makes the atomic upsert safe: two concurrent
+            # requests cannot create two counters for the same window.
+            database[USAGE_COLLECTION].create_index(
+                [("user_id", 1), ("window", 1), ("window_start", 1)],
+                unique=True,
+                name="uniq_user_window",
+            )
+            # MongoDB expires spent windows itself. This is a database
+            # feature, not a background worker.
+            database[USAGE_COLLECTION].create_index(
+                "window_start",
+                expireAfterSeconds=settings.USAGE_RETENTION_DAYS * 24 * 60 * 60,
+                name="usage_ttl",
+            )
+
+            # The only list query: this user's documents, newest first.
+            # Nothing sorts by updated_at, so no second index is added.
+            database[DOCUMENTS_COLLECTION].create_index(
+                [("user_id", 1), ("created_at", -1)], name="user_documents"
+            )
+
             logger.info("Database indexes ensured")
         except PyMongoError as exc:
             # A failure here must not stop the application from starting; the
@@ -266,3 +290,13 @@ def get_conversations_collection() -> Collection:
 def get_messages_collection() -> Collection:
     """Handle for the messages collection."""
     return mongodb.get_database()[MESSAGES_COLLECTION]
+
+
+def get_usage_collection() -> Collection:
+    """Handle for the AI usage counters."""
+    return mongodb.get_database()[USAGE_COLLECTION]
+
+
+def get_documents_collection() -> Collection:
+    """Handle for persisted documents."""
+    return mongodb.get_database()[DOCUMENTS_COLLECTION]

@@ -656,11 +656,16 @@ def test_message_documents_hold_only_expected_fields(
         USER_A, conversation_id, TaskType.SUMMARIZE, "text", DEFAULTS
     )
 
+    # `source` was added in Phase 14 so a transcript can show which document
+    # a turn came from. It is null for typed messages, which is why every
+    # message written before Phase 14 still reads correctly.
     assert set(messages.documents[0]) == {
         "_id", "conversation_id", "user_id", "role", "content", "task_type",
-        "model", "created_at",
+        "model", "created_at", "source",
     }
     assert set(messages.documents[1]) == {
         "_id", "conversation_id", "user_id", "role", "content", "task_type",
-        "model", "created_at", "data",
+        "model", "created_at", "data", "source",
     }
+    assert messages.documents[0]["source"] is None
+    assert messages.documents[1]["source"] is None

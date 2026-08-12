@@ -66,6 +66,21 @@ def _code_for_status(status_code: int) -> str:
     return _STATUS_CODE_NAMES.get(status_code, "HTTP_ERROR")
 
 
+def _retry_after_header(exc: AppError) -> dict[str, str] | None:
+    """Standard `Retry-After` for a rate-limited response.
+
+    Reads `retry_after_seconds` from the error's details when present. Putting
+    it in a header rather than only in the body means generic HTTP clients and
+    proxies can honour it without understanding our envelope.
+    """
+    if exc.status_code != 429 or not isinstance(exc.details, dict):
+        return None
+    seconds = exc.details.get("retry_after_seconds")
+    if isinstance(seconds, int) and seconds > 0:
+        return {"Retry-After": str(seconds)}
+    return None
+
+
 def _field_name(err: dict) -> str:
     """Name the field a validation error refers to.
 
@@ -89,6 +104,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=error(code=exc.code, message=exc.message, details=exc.details),
+            headers=_retry_after_header(exc),
         )
 
     @app.exception_handler(StarletteHTTPException)

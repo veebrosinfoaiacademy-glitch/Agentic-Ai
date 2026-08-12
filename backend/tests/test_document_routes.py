@@ -19,7 +19,9 @@ client = TestClient(app)
 # Phase 10 protects these routes. These tests cover behaviour, not
 # authentication, so they run as a signed-in user. Protection itself is
 # verified in test_route_protection.py against the real dependency.
-pytestmark = pytest.mark.usefixtures("authenticated")
+# Phase 14 persists uploads, so these behaviour tests also need a documents
+# collection. Persistence itself is covered in test_document_persistence.py.
+pytestmark = pytest.mark.usefixtures("authenticated", "documents")
 
 UPLOAD = "/api/documents/upload"
 
@@ -38,7 +40,7 @@ def upload(filename: str, data: bytes, content_type: str = "application/octet-st
 def test_txt_upload_returns_the_standard_envelope() -> None:
     response = upload("notes.txt", b"Hello document world.", "text/plain")
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     body = response.json()
     assert set(body.keys()) == {"success", "message", "data"}
     assert body["success"] is True
@@ -56,7 +58,7 @@ def test_txt_upload_returns_the_standard_envelope() -> None:
 def test_markdown_upload_preserves_syntax() -> None:
     response = upload("readme.md", b"# Title\n\n- item one\n- item two", "text/markdown")
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     text = response.json()["data"]["text"]
     assert "# Title" in text
     assert "- item one" in text
@@ -67,7 +69,7 @@ def test_csv_upload_returns_readable_text_and_metadata() -> None:
         "people.csv", b"name,age,city\nAlice,22,Chennai\nBob,25,Bangalore", "text/csv"
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     data = response.json()["data"]
     assert "Header: name, age, city" in data["text"]
     assert "Alice | 22 | Chennai" in data["text"]
@@ -80,7 +82,7 @@ def test_pdf_upload_returns_page_metadata() -> None:
         "report.pdf", make_pdf(["Page one text.", "Page two text."]), "application/pdf"
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     data = response.json()["data"]
     assert data["metadata"]["page_count"] == 2
     assert "--- Page 1 ---" in data["text"]
@@ -94,7 +96,7 @@ def test_docx_upload_returns_paragraph_and_table_metadata() -> None:
         DOCX_MIME,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     data = response.json()["data"]
     assert "Some intro text." in data["text"]
     assert "Name | Role" in data["text"]
@@ -203,6 +205,7 @@ def test_wrong_form_field_name_is_rejected() -> None:
 
 
 def test_supported_types_reports_limits_from_configuration() -> None:
+    """A GET, so still 200 — only uploads became 201 Created."""
     response = client.get("/api/documents/supported-types")
 
     assert response.status_code == 200
@@ -235,7 +238,7 @@ def test_response_never_exposes_a_filesystem_path() -> None:
     """Not even the client's own path — it is reduced to a basename."""
     response = upload("../../../etc/secret/notes.txt", b"content", "text/plain")
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     raw = response.text
     assert response.json()["data"]["filename"] == "notes.txt"
     for leak in ("/etc/", "/var/", "/tmp/", "/Users/", "..", "site-packages"):
@@ -248,7 +251,7 @@ def test_a_python_file_renamed_to_txt_is_treated_as_inert_text() -> None:
 
     response = upload("innocent.txt", payload, "text/plain")
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     # Returned verbatim as text. Nothing imported it, ran it, or evaluated it.
     assert "os.system" in response.json()["data"]["text"]
 
@@ -256,7 +259,7 @@ def test_a_python_file_renamed_to_txt_is_treated_as_inert_text() -> None:
 def test_csv_formula_injection_is_returned_as_text() -> None:
     response = upload("f.csv", b'formula\n"=SUM(1,2)"\n"=cmd|calc"', "text/csv")
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     text = response.json()["data"]["text"]
     assert "=SUM(1,2)" in text
 
@@ -294,6 +297,10 @@ def test_document_processing_source_has_no_execution_primitives() -> None:
         app_dir / "services" / "document_service.py",
         app_dir / "routes" / "documents.py",
         app_dir / "schemas" / "document_schemas.py",
+        # Phase 14 added persistence and the conversation bridge; both handle
+        # user-supplied content and must stay execution-free.
+        app_dir / "services" / "conversation_service.py",
+        app_dir / "schemas" / "conversation_schemas.py",
     ]
 
     forbidden_calls = {"exec", "eval", "compile", "__import__"}
@@ -335,22 +342,27 @@ def test_document_processing_source_has_no_execution_primitives() -> None:
     assert offenders == [], f"execution primitives found: {offenders}"
 
 
-def test_upload_does_not_persist_to_mongodb() -> None:
-    """Phase 7 stores nothing. The DB is not even connected during upload."""
-    from app.database import mongodb
+def test_upload_persists_the_extracted_text(documents) -> None:
+    """Phase 14 deliberately inverts Phase 7's "stores nothing" contract.
 
-    mongodb._client = None
-    mongodb._connected = False
-
+    The uploaded FILE is still never stored — only the extracted text and
+    safe metadata, so the document can be reopened and reused.
+    """
     response = upload("notes.txt", b"content", "text/plain")
 
-    assert response.status_code == 200
-    assert mongodb._client is None
+    assert response.status_code == 201
+    assert response.json()["data"]["id"]
+
+    stored = documents.documents[0]
+    assert stored["text"] == "content"
+    assert "user_id" in stored
+    # The binary itself is still never kept.
+    assert not any(isinstance(v, bytes) for v in stored.values())
 
 
 def test_upload_does_not_call_groq(recorded_generate) -> None:
     """Upload stays independent of AI processing in this phase."""
     response = upload("notes.txt", b"Some document content.", "text/plain")
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert recorded_generate.calls == []

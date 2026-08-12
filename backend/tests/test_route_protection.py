@@ -16,7 +16,7 @@ from bson import ObjectId
 from fastapi.testclient import TestClient
 
 from app.main import app
-from tests.conftest import FakeUsersCollection
+from tests.conftest import FakeCollection, FakeUsersCollection
 
 client = TestClient(app)
 
@@ -215,13 +215,14 @@ def test_valid_token_reaches_the_endpoint(
 
 
 def test_valid_token_reaches_upload(
-    users: FakeUsersCollection, jwt_secret: str
+    users: FakeUsersCollection, jwt_secret: str, documents: FakeCollection
 ) -> None:
     token = register_and_login(users)
 
     response = client.post(UPLOAD, files=UPLOAD_FILE, headers=bearer(token))
 
-    assert response.status_code == 200
+    # 201 since Phase 14: the upload now creates a stored document.
+    assert response.status_code == 201
     assert response.json()["data"]["text"] == "Some document text."
 
 

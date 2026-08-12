@@ -10,7 +10,7 @@ treated purely as text to put in a prompt.
 from fastapi import APIRouter
 
 from app.agents.developer_agent import DeveloperResult, developer_agent
-from app.dependencies.auth import CurrentUser
+from app.dependencies.quota import QuotaCheckedUser
 from app.schemas.common_schemas import SuccessResponse, success
 from app.schemas.developer_schemas import (
     BugAnalysisRequest,
@@ -46,7 +46,7 @@ def _payload(result: DeveloperResult) -> dict:
         "is not executed or verified."
     ),
 )
-def generate_code(request: CodeGenerationRequest, user: CurrentUser) -> dict:
+def generate_code(request: CodeGenerationRequest, user: QuotaCheckedUser) -> dict:
     result = developer_agent.generate_code(
         language=request.language,
         description=request.description,
@@ -64,7 +64,7 @@ def generate_code(request: CodeGenerationRequest, user: CurrentUser) -> dict:
         "any genuine problems visible in the supplied code."
     ),
 )
-def explain_code(request: CodeExplanationRequest, user: CurrentUser) -> dict:
+def explain_code(request: CodeExplanationRequest, user: QuotaCheckedUser) -> dict:
     result = developer_agent.explain_code(
         language=request.language, code=request.code
     )
@@ -81,7 +81,7 @@ def explain_code(request: CodeExplanationRequest, user: CurrentUser) -> dict:
         "discarded rather than reported."
     ),
 )
-def review_code(request: CodeReviewRequest, user: CurrentUser) -> dict:
+def review_code(request: CodeReviewRequest, user: QuotaCheckedUser) -> dict:
     result = developer_agent.review_code(
         language=request.language,
         code=request.code,
@@ -100,7 +100,7 @@ def review_code(request: CodeReviewRequest, user: CurrentUser) -> dict:
         "the reasoning and the trade-offs."
     ),
 )
-def refactor_code(request: CodeRefactorRequest, user: CurrentUser) -> dict:
+def refactor_code(request: CodeRefactorRequest, user: QuotaCheckedUser) -> dict:
     result = developer_agent.refactor_code(
         language=request.language, code=request.code, goals=request.goals
     )
@@ -117,7 +117,7 @@ def refactor_code(request: CodeRefactorRequest, user: CurrentUser) -> dict:
         "the response carries an explicit disclaimer saying so."
     ),
 )
-def generate_tests(request: TestGenerationRequest, user: CurrentUser) -> dict:
+def generate_tests(request: TestGenerationRequest, user: QuotaCheckedUser) -> dict:
     result = developer_agent.generate_tests(
         language=request.language, code=request.code, framework=request.framework
     )
@@ -134,7 +134,7 @@ def generate_tests(request: TestGenerationRequest, user: CurrentUser) -> dict:
         "observed evidence from reasoning. The bug is not reproduced."
     ),
 )
-def analyse_bug(request: BugAnalysisRequest, user: CurrentUser) -> dict:
+def analyse_bug(request: BugAnalysisRequest, user: QuotaCheckedUser) -> dict:
     result = developer_agent.analyse_bug(
         language=request.language,
         code=request.code,
@@ -154,7 +154,7 @@ def analyse_bug(request: BugAnalysisRequest, user: CurrentUser) -> dict:
         "rather than invented."
     ),
 )
-def generate_documentation(request: DocumentationRequest, user: CurrentUser) -> dict:
+def generate_documentation(request: DocumentationRequest, user: QuotaCheckedUser) -> dict:
     result = developer_agent.generate_documentation(
         language=request.language,
         code=request.code,

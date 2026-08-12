@@ -40,10 +40,16 @@ export function deleteConversation(conversationId) {
  * `options` is optional; every field defaults to the same value the matching
  * direct endpoint uses, so `{ taskType, prompt }` alone is a valid request.
  */
-export function sendMessage(conversationId, { taskType, prompt, options }) {
+export function sendMessage(
+  conversationId,
+  { taskType, prompt, options, documentId },
+) {
   return api.post(`/conversations/${conversationId}/messages`, {
     task_type: taskType,
-    prompt,
+    // Omitted when a document supplies the source, so the server's stored
+    // copy is used. The client never sends document content.
+    ...(prompt ? { prompt } : {}),
+    ...(documentId ? { document_id: documentId } : {}),
     ...(options ? { options } : {}),
   })
 }

@@ -503,14 +503,41 @@ class FakeCollection:
         self.queries.append(dict(query))
         return sum(1 for d in self.documents if self._matches(d, query))
 
-    def find_one_and_update(self, query: dict, update: dict, **kwargs) -> dict | None:
+    @staticmethod
+    def _apply_update(document: dict, update: dict) -> None:
+        """Apply the update operators the application actually uses."""
+        document.update(update.get("$set", {}))
+        for field, amount in update.get("$inc", {}).items():
+            document[field] = document.get(field, 0) + amount
+
+    def find_one_and_update(
+        self, query: dict, update: dict, upsert: bool = False, **kwargs
+    ) -> dict | None:
+        """Match real PyMongo closely enough for the usage counters.
+
+        With upsert=True and ReturnDocument.AFTER, MongoDB creates the
+        document from the filter, applies the update and returns the result.
+        The usage service relies on exactly that to increment-and-read in one
+        atomic round trip, so the fake has to model it rather than returning
+        None for a missing document.
+        """
         self._check()
         self.queries.append(dict(query))
+
         for document in self.documents:
             if self._matches(document, query):
-                document.update(update.get("$set", {}))
+                self._apply_update(document, update)
                 return dict(document)
-        return None
+
+        if not upsert:
+            return None
+
+        from bson import ObjectId
+
+        created = {"_id": ObjectId(), **query}
+        self._apply_update(created, update)
+        self.documents.append(created)
+        return dict(created)
 
     def update_one(self, query: dict, update: dict):
         self._check()
@@ -588,6 +615,74 @@ def failing_conversations(monkeypatch: pytest.MonkeyPatch) -> FakeCollection:
         lambda: collection,
     )
     return collection
+
+
+@pytest.fixture
+def documents(monkeypatch: pytest.MonkeyPatch) -> FakeCollection:
+    """In-memory documents collection wired into the repository."""
+    collection = FakeCollection()
+    monkeypatch.setattr(
+        "app.services.document_service.get_documents_collection", lambda: collection
+    )
+    return collection
+
+
+@pytest.fixture
+def failing_documents(monkeypatch: pytest.MonkeyPatch) -> FakeCollection:
+    """Simulate MongoDB being unreachable for document operations."""
+    collection = FakeCollection(fail=True)
+    monkeypatch.setattr(
+        "app.services.document_service.get_documents_collection", lambda: collection
+    )
+    return collection
+
+
+@pytest.fixture
+def usage_counters(monkeypatch: pytest.MonkeyPatch) -> FakeCollection:
+    """In-memory usage counters wired into the usage service.
+
+    Without this the service fails open (its documented behaviour), so a test
+    that wants limits actually enforced must ask for this fixture.
+    """
+    collection = FakeCollection()
+    monkeypatch.setattr(
+        "app.services.usage_service._collection", lambda: collection
+    )
+    return collection
+
+
+@pytest.fixture
+def failing_usage_counters(monkeypatch: pytest.MonkeyPatch) -> FakeCollection:
+    """Simulate the usage collection being unreachable."""
+    collection = FakeCollection(fail=True)
+    monkeypatch.setattr(
+        "app.services.usage_service._collection", lambda: collection
+    )
+    return collection
+
+
+@pytest.fixture
+def ai_limits(monkeypatch: pytest.MonkeyPatch):
+    """Set hourly/daily AI limits for one test.
+
+    Returns a setter so a test can choose its own numbers:
+        ai_limits(hour=2, day=10)
+    """
+
+    def apply(hour: int = 100, day: int = 500) -> None:
+        monkeypatch.setattr(settings, "AI_RATE_LIMIT_PER_HOUR", hour)
+        monkeypatch.setattr(settings, "AI_RATE_LIMIT_PER_DAY", day)
+
+    return apply
+
+
+@pytest.fixture(autouse=True)
+def reset_request_id() -> Iterator[None]:
+    """Keep correlation ids from leaking between tests."""
+    from app.utils.request_context import set_request_id
+
+    yield
+    set_request_id("-")
 
 
 @pytest.fixture

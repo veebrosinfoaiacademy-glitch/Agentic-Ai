@@ -11,6 +11,7 @@ used to reach another account's data.
 from fastapi import APIRouter, Query, status
 
 from app.dependencies.auth import CurrentUser
+from app.dependencies.quota import QuotaCheckedUser
 from app.schemas.common_schemas import SuccessResponse, success
 from app.schemas.conversation_schemas import (
     DEFAULT_PAGE_SIZE,
@@ -137,7 +138,10 @@ def delete_conversation(conversation_id: str, user: CurrentUser) -> dict:
         "developer task in a content conversation is rejected rather than "
         "silently run by the wrong agent.\n\n"
         "`options` is optional; every field defaults to the same value the "
-        "matching direct endpoint uses."
+        "matching direct endpoint uses.\n\n"
+        "Supply `document_id` to use a stored document as the source text. "
+        "The text is read from the server's copy, so a client cannot "
+        "substitute its own. Either `prompt` or `document_id` is required."
     ),
     responses={
         404: _NOT_FOUND,
@@ -146,7 +150,7 @@ def delete_conversation(conversation_id: str, user: CurrentUser) -> dict:
     },
 )
 def send_message(
-    conversation_id: str, request: SendMessageRequest, user: CurrentUser
+    conversation_id: str, request: SendMessageRequest, user: QuotaCheckedUser
 ) -> dict:
     result = conversation_service.send_message(
         user_id=user.id,
@@ -154,6 +158,7 @@ def send_message(
         task_type=request.task_type,
         prompt=request.prompt,
         options=request.options,
+        document_id=request.document_id,
     )
     return success(
         data=result.model_dump(mode="json"), message="Message sent successfully"

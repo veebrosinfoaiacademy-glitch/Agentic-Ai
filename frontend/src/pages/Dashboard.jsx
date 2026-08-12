@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { listConversations } from '../api/conversations'
 import { Badge, Card, EmptyState, Spinner } from '../components/common'
+import UsageMeter from '../components/common/UsageMeter'
 import { useAuth } from '../context/useAuth'
 import { humanise } from '../utils/errorMessages'
 
@@ -157,7 +158,10 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <RecentConversations />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <RecentConversations />
+        <UsageMeter />
+      </div>
 
       <p className="text-xs text-slate-400">
         Requests are sent to your own backend, which calls the AI provider. No

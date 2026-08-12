@@ -16,7 +16,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from app.schemas.content_schemas import (
     Audience,
@@ -204,12 +204,45 @@ class RenameConversationRequest(BaseModel):
     title: TitleText
 
 
+class MessageSource(BaseModel):
+    """Where a message's source text came from, when it was not typed.
+
+    Only the reference is kept — never a copy of the document text, which
+    would duplicate up to 100,000 characters into every message. `filename`
+    is denormalised on purpose so a transcript stays readable after the
+    document is deleted.
+    """
+
+    type: str = "document"
+    document_id: str
+    filename: str
+
+
 class SendMessageRequest(BaseModel):
-    """POST /api/conversations/{id}/messages"""
+    """POST /api/conversations/{id}/messages
+
+    Either `prompt` or `document_id` must be supplied.
+
+    When `document_id` is given, the source text is read from the stored
+    document — the server's copy, never one sent by the client. A `prompt`
+    alongside it is treated as the human label for the transcript, not as
+    content, so it cannot be used to smuggle in substitute text.
+    """
 
     task_type: TaskType
-    prompt: PromptText
+    prompt: PromptText | None = None
+    document_id: str | None = Field(
+        default=None,
+        description="Use a stored document as the source text for this task.",
+    )
     options: MessageOptions = Field(default_factory=MessageOptions)
+
+    @model_validator(mode="after")
+    def require_a_source(self) -> "SendMessageRequest":
+        """A task needs something to work on."""
+        if not self.prompt and not self.document_id:
+            raise ValueError("Provide either prompt or document_id")
+        return self
 
     model_config = {
         "json_schema_extra": {
@@ -253,6 +286,9 @@ class MessageData(BaseModel):
     # `content` is always the readable transcript text; this carries the shape
     # the agent pages already know how to render.
     data: dict | None = None
+    # Present when the source text came from an uploaded document. Absent on
+    # every message written before Phase 14, which is why it is nullable.
+    source: MessageSource | None = None
 
 
 class ConversationDetailData(ConversationData):

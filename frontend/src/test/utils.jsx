@@ -31,12 +31,19 @@ export const FAKE_USER = {
 }
 
 /** Build the ApiError shape the client interceptor produces. */
-export function apiError(code, message, { status = 400, details = null } = {}) {
+export function apiError(
+  code,
+  message,
+  { status = 400, details = null, requestId = null } = {},
+) {
   const error = new Error(message)
   error.name = 'ApiError'
   error.code = code
   error.details = details
   error.status = status
+  // The X-Request-ID the real client copies off the response, so tests can
+  // assert it reaches the UI.
+  error.requestId = requestId
   Object.defineProperty(error, 'fieldErrors', {
     get() {
       if (code !== 'VALIDATION_ERROR' || !Array.isArray(details)) return {}

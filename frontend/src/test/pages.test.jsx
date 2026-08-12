@@ -23,6 +23,10 @@ beforeEach(() => {
     max_extracted_characters: 100000,
     ocr_supported: false,
   })
+  // Phase 14: the page also lists persisted documents.
+  documentsApi.listDocuments.mockResolvedValue({
+    documents: [], page: 1, page_size: 50, total: 0, has_more: false,
+  })
 })
 
 const META = { task_type: 'x', model: 'llama-3.3-70b-versatile', usage: { total_tokens: 42 } }
@@ -306,15 +310,21 @@ describe('Documents', () => {
     expect(documentsApi.getSupportedTypes).toHaveBeenCalled()
   })
 
-  it('shows an empty state before any upload', async () => {
+  it('shows an empty state when no documents are stored', async () => {
+    // Phase 14 replaced the one-shot "nothing extracted yet" panel with a
+    // list of persisted documents.
     renderApp('/documents')
 
-    expect(await screen.findByText(/nothing extracted yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no documents yet/i)).toBeInTheDocument()
   })
 
-  it('uploads a file and shows the extracted text with metadata', async () => {
+  it('uploads a file, persists it, and opens its detail page', async () => {
+    // Phase 14: the upload is stored and the user lands on the document,
+    // rather than seeing a one-shot extraction panel.
     const user = userEvent.setup()
-    documentsApi.uploadDocument.mockResolvedValue({
+    const stored = {
+      id: '507f1f77bcf86cd799439011',
+      title: 'report.pdf',
       filename: 'report.pdf',
       extension: '.pdf',
       content_type: 'application/pdf',
@@ -322,10 +332,15 @@ describe('Documents', () => {
       characters: 120,
       text: 'Quarterly report contents.',
       metadata: { page_count: 2, pages_with_text: 2 },
-    })
+      created_at: '2026-01-01T10:00:00Z',
+      updated_at: '2026-01-01T10:00:00Z',
+    }
+    documentsApi.uploadDocument.mockResolvedValue(stored)
+    documentsApi.getDocument.mockResolvedValue(stored)
 
     renderApp('/documents')
-    const input = await screen.findByLabelText(/choose a file/i)
+    await screen.findByText(/\.txt, \.md/i)
+    const input = screen.getByLabelText(/choose a file/i)
     await user.upload(input, new File(['%PDF-1.4'], 'report.pdf', { type: 'application/pdf' }))
 
     expect(screen.getByText('report.pdf')).toBeInTheDocument()
@@ -368,9 +383,13 @@ describe('Documents', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/no readable text/i)
   })
 
-  it('hands extracted text to the Content Agent without a backend call', async () => {
-    const user = userEvent.setup()
-    documentsApi.uploadDocument.mockResolvedValue({
+  it('offers the stored document for use in a conversation', async () => {
+    // Phase 14 replaced Phase 9's one-shot router-state hop to /content with
+    // a persisted document that can be reused in a saved conversation. The
+    // full flow is covered in documents.test.jsx.
+    const stored = {
+      id: '507f1f77bcf86cd799439011',
+      title: 'notes.txt',
       filename: 'notes.txt',
       extension: '.txt',
       content_type: 'text/plain',
@@ -378,17 +397,16 @@ describe('Documents', () => {
       characters: 26,
       text: 'Some extracted document text.',
       metadata: { encoding: 'utf-8' },
-    })
+      created_at: '2026-01-01T10:00:00Z',
+      updated_at: '2026-01-01T10:00:00Z',
+    }
+    documentsApi.getDocument.mockResolvedValue(stored)
 
-    renderApp('/documents')
-    const input = await screen.findByLabelText(/choose a file/i)
-    await user.upload(input, new File(['hello'], 'notes.txt', { type: 'text/plain' }))
-    await user.click(screen.getByRole('button', { name: /upload and extract/i }))
-    await screen.findByRole('button', { name: /use in content agent/i })
-    await user.click(screen.getByRole('button', { name: /use in content agent/i }))
+    renderApp(`/documents/${stored.id}`)
 
-    // Landed on the Content Agent with the text pre-filled.
-    expect(await screen.findByRole('heading', { name: /content agent/i })).toBeInTheDocument()
-    expect(screen.getByLabelText(/source text/i)).toHaveValue('Some extracted document text.')
+    expect(
+      await screen.findByRole('button', { name: /use in a conversation/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Some extracted document text.')).toBeInTheDocument()
   })
 })

@@ -23,3 +23,24 @@ export function uploadDocument(file) {
     headers: { 'Content-Type': undefined },
   })
 }
+
+
+/** GET /api/documents → { documents, page, page_size, total, has_more } */
+export function listDocuments({ page = 1, pageSize = 20 } = {}) {
+  return api.get('/documents', { params: { page, page_size: pageSize } })
+}
+
+/** GET /api/documents/{id} → the document including its extracted text */
+export function getDocument(documentId) {
+  return api.get(`/documents/${documentId}`)
+}
+
+/** PATCH /api/documents/{id} — title is the only mutable field */
+export function renameDocument(documentId, title) {
+  return api.patch(`/documents/${documentId}`, { title })
+}
+
+/** DELETE /api/documents/{id} */
+export function deleteDocument(documentId) {
+  return api.delete(`/documents/${documentId}`)
+}

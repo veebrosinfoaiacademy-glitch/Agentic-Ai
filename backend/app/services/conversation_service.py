@@ -21,9 +21,11 @@ from pymongo.errors import PyMongoError
 from app.agents.content_agent import content_agent
 from app.agents.developer_agent import developer_agent
 from app.database import get_conversations_collection, get_messages_collection
+from app.services.document_service import document_repository
 from app.schemas.conversation_schemas import (
     TASKS_BY_AGENT,
     AgentType,
+    MessageSource,
     ConversationData,
     ConversationDetailData,
     ConversationListData,
@@ -128,6 +130,7 @@ def _to_message(document: dict) -> MessageData:
         model=document.get("model"),
         created_at=document["created_at"],
         data=document.get("data"),
+        source=document.get("source"),
     )
 
 
@@ -417,8 +420,9 @@ class ConversationService:
         user_id: str,
         conversation_id: str,
         task_type: TaskType,
-        prompt: str,
+        prompt: str | None,
         options: MessageOptions,
+        document_id: str | None = None,
     ) -> SendMessageData:
         """Run one agent task inside a conversation and record both turns.
 
@@ -426,9 +430,16 @@ class ConversationService:
 
         1. verify ownership — before any provider spend;
         2. reject a task the conversation's agent cannot perform;
-        3. persist the user's message;
-        4. call the existing agent;
-        5. persist the assistant reply only if step 4 succeeded.
+        3. resolve the source text — from a stored document if one was
+           named, otherwise from the typed prompt;
+        4. persist the user's message;
+        5. call the existing agent;
+        6. persist the assistant reply only if step 5 succeeded.
+
+        When `document_id` is given the text is read from MongoDB, scoped to
+        the caller. A client cannot substitute its own copy: whatever it
+        sends as `prompt` becomes the transcript label, never the content the
+        agent sees.
 
         On an AI failure the user's message is kept. It is something the
         person actually wrote, and a chat that silently discards your input
@@ -450,6 +461,25 @@ class ConversationService:
                 status_code=422,
             )
 
+        # Resolve the source. Ownership of the document is enforced by the
+        # repository's own query, so a foreign id fails here — before any
+        # provider spend — with the same 404 a missing one produces.
+        source: MessageSource | None = None
+        if document_id:
+            document = document_repository.get_owned(user_id, document_id)
+            source_text = document.get("text", "")
+            source = MessageSource(
+                type="document",
+                document_id=str(document["_id"]),
+                filename=document["filename"],
+            )
+            # The transcript shows what the person asked plus which file it
+            # came from — not a second copy of the whole document.
+            transcript = prompt or f'{task_type.value} "{document["title"]}"'
+        else:
+            source_text = prompt or ""
+            transcript = source_text
+
         messages = get_messages_collection()
         owner = conversation["user_id"]
         oid = conversation["_id"]
@@ -458,10 +488,11 @@ class ConversationService:
             "conversation_id": oid,
             "user_id": owner,
             "role": MessageRole.USER.value,
-            "content": prompt,
+            "content": transcript,
             "task_type": task_type.value,
             "model": None,
             "created_at": _now(),
+            "source": source.model_dump() if source else None,
         }
         try:
             user_document["_id"] = messages.insert_one(user_document).inserted_id
@@ -471,7 +502,7 @@ class ConversationService:
         # Errors from the agent (provider failures, invalid model output) are
         # already AppErrors and propagate untouched. No assistant message is
         # written, and the caller sees the existing provider error envelope.
-        result = AGENT_DISPATCH[agent_type](task_type, prompt, options)
+        result = AGENT_DISPATCH[agent_type](task_type, source_text, options)
 
         assistant_document = {
             "conversation_id": oid,
@@ -482,6 +513,7 @@ class ConversationService:
             "model": getattr(result, "model", None),
             "created_at": _now(),
             "data": _structured_payload(result),
+            "source": source.model_dump() if source else None,
         }
         try:
             assistant_document["_id"] = messages.insert_one(

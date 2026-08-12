@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     # the .env file readable.
     CORS_ORIGINS: str = "http://localhost:5173"
 
+    # ---- AI usage limits ----
+    # Per-user ceilings on AI requests, guarding provider spend. 0 disables a
+    # limit entirely. Defaults are generous so development is unaffected until
+    # real values are set.
+    AI_RATE_LIMIT_PER_HOUR: int = 100
+    AI_RATE_LIMIT_PER_DAY: int = 500
+
+    # How long spent usage windows are kept before MongoDB's TTL monitor
+    # removes them. Two days covers the longest window (daily) with margin.
+    USAGE_RETENTION_DAYS: int = 2
+
     # ---- Uploads ----
     # Caps the uploaded FILE. Reused for documents rather than adding a second
     # size setting — two knobs for one limit is how they drift apart.

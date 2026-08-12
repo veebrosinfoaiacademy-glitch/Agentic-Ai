@@ -12,14 +12,22 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import mongodb
+from app.dependencies.quota import RESERVATION_ATTR
 from app.routes import api_router
 from app.services.groq_service import groq_service
+from app.services.usage_service import usage_service
 from app.utils.errors import register_exception_handlers
+from app.utils.request_context import (
+    REQUEST_ID_HEADER,
+    RequestIdFilter,
+    sanitise_request_id,
+    set_request_id,
+)
 
 # Root stays at INFO. Setting the root logger to DEBUG would also switch on
 # DEBUG for every third-party library, and PyMongo's debug stream in
@@ -27,8 +35,14 @@ from app.utils.errors import register_exception_handlers
 # we do not want, and connection details we do not want written to disk.
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    # [request_id] makes every line traceable back to one HTTP request.
+    format="%(asctime)s | %(levelname)-8s | %(name)s | [%(request_id)s] %(message)s",
 )
+
+# The filter supplies `request_id` for every record reaching a handler, so the
+# format string above can rely on it even for third-party loggers.
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(RequestIdFilter())
 
 # Only our own loggers follow the DEBUG flag.
 logging.getLogger("app").setLevel(logging.DEBUG if settings.DEBUG else logging.INFO)
@@ -115,6 +129,44 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["*"],
     )
+
+    # --- Correlation and quota middleware ---
+    # Registration order matters: Starlette runs the LAST-registered
+    # middleware outermost, so the request id is established before the quota
+    # refund runs and is still bound when its response passes back through.
+
+    @app.middleware("http")
+    async def refund_unused_quota(request: Request, call_next):
+        """Give back a quota claim when the request produced nothing.
+
+        FastAPI runs dependencies before validating the body, so a malformed
+        request can reserve quota it never spends. Anything that did not
+        succeed — a 422, a provider failure — returns its claim here.
+        """
+        response = await call_next(request)
+
+        user_id = getattr(request.state, RESERVATION_ATTR, None)
+        if user_id and response.status_code >= 400:
+            usage_service.refund(user_id)
+
+        return response
+
+    @app.middleware("http")
+    async def attach_request_id(request: Request, call_next):
+        """Bind a correlation id to the request and echo it on the response.
+
+        An inbound id is accepted only if it passes the character and length
+        whitelist; anything else is replaced rather than cleaned, since a
+        silently altered id correlates nothing and an uncleaned one could
+        forge log lines.
+        """
+        request_id = sanitise_request_id(request.headers.get(REQUEST_ID_HEADER))
+        set_request_id(request_id)
+        request.state.request_id = request_id
+
+        response = await call_next(request)
+        response.headers[REQUEST_ID_HEADER] = request_id
+        return response
 
     # --- Exception handlers ---
     # Registered before routers so that any failure raised inside a route is

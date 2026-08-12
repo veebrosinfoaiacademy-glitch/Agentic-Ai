@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import * as conversationsApi from '../api/conversations'
 import {
@@ -49,7 +49,17 @@ function formatTime(value) {
 export default function ConversationDetail() {
   const { conversationId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const transcriptEnd = useRef(null)
+
+  // A document handed over from its detail page. Only the id travels; the
+  // server reads the text from its own stored copy, so a stale or tampered
+  // client copy can never reach the agent.
+  const [attached, setAttached] = useState(
+    location.state?.documentId
+      ? { id: location.state.documentId, title: location.state.documentTitle }
+      : null,
+  )
 
   const [conversation, setConversation] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -94,7 +104,9 @@ export default function ConversationDetail() {
 
     setSendError(null)
     setFieldError(null)
-    if (!prompt.trim()) {
+    // With a document attached the prompt is an optional label, because the
+    // source text comes from the document itself.
+    if (!prompt.trim() && !attached) {
       setFieldError('Enter something to send')
       return
     }
@@ -103,7 +115,8 @@ export default function ConversationDetail() {
     try {
       const result = await conversationsApi.sendMessage(conversationId, {
         taskType,
-        prompt: prompt.trim(),
+        prompt: prompt.trim() || undefined,
+        documentId: attached?.id,
       })
       setConversation((current) => ({
         ...current,
@@ -238,16 +251,37 @@ export default function ConversationDetail() {
             onChange={(event) => setTaskType(event.target.value)}
             options={tasks.map((task) => ({ value: task, label: humanise(task) }))}
           />
+          {attached && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-indigo-50 px-4 py-3 ring-1 ring-inset ring-indigo-200">
+              <p className="min-w-0 text-sm text-indigo-900">
+                <span aria-hidden="true">⬒ </span>
+                Using <span className="font-medium">{attached.title}</span> as the
+                source
+              </p>
+              <Button
+                variant="ghost"
+                onClick={() => setAttached(null)}
+                disabled={isSending}
+              >
+                Remove
+              </Button>
+            </div>
+          )}
+
           <TextArea
-            label="Your message"
-            required
+            label={attached ? 'Instructions (optional)' : 'Your message'}
+            required={!attached}
             rows={CODE_TASKS.has(taskType) ? 12 : 8}
             mono={CODE_TASKS.has(taskType)}
             spellCheck={!CODE_TASKS.has(taskType)}
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             error={fieldError}
-            placeholder={PROMPT_HINTS[taskType] ?? 'Type your message…'}
+            placeholder={
+              attached
+                ? 'Optional — a note for the transcript'
+                : (PROMPT_HINTS[taskType] ?? 'Type your message…')
+            }
           />
           {sendError && <Alert variant="error">{sendError}</Alert>}
           <Button type="submit" loading={isSending}>
@@ -275,6 +309,16 @@ function Message({ message }) {
         <span className="text-xs text-slate-400">{formatTime(message.created_at)}</span>
         {!isUser && <span className="ml-auto"><CopyButton text={message.content} /></span>}
       </header>
+
+      {/* Escaped plain text — a document's contents can never inject markup. */}
+      {message.source && (
+        <p className="mb-2 flex items-center gap-1.5 text-xs text-slate-500">
+          <span aria-hidden="true">⬒</span>
+          <span>
+            Source: <span className="font-medium">{message.source.filename}</span>
+          </span>
+        </p>
+      )}
 
       <ProseBlock text={message.content} />
 

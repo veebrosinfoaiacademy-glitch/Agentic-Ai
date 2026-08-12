@@ -8,6 +8,7 @@ import ConversationDetail from './pages/ConversationDetail'
 import Conversations from './pages/Conversations'
 import Dashboard from './pages/Dashboard'
 import DeveloperAgent from './pages/DeveloperAgent'
+import DocumentDetail from './pages/DocumentDetail'
 import Documents from './pages/Documents'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/content" element={<ContentAgent />} />
           <Route path="/developer" element={<DeveloperAgent />} />
           <Route path="/documents" element={<Documents />} />
+          <Route path="/documents/:documentId" element={<DocumentDetail />} />
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/conversations/:conversationId" element={<ConversationDetail />} />
         </Route>

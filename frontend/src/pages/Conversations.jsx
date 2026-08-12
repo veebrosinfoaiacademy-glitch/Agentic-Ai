@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import * as conversationsApi from '../api/conversations'
 import {
@@ -29,6 +29,12 @@ function formatDate(value) {
 
 export default function Conversations() {
   const navigate = useNavigate()
+  const location = useLocation()
+  // A document handed over from its detail page. Purely frontend state —
+  // the server resolves the text from its own copy when the message is sent.
+  const attached = location.state?.documentId
+    ? { id: location.state.documentId, title: location.state.documentTitle }
+    : null
 
   const [conversations, setConversations] = useState([])
   const [total, setTotal] = useState(0)
@@ -71,7 +77,7 @@ export default function Conversations() {
     setIsCreating(true)
     try {
       const created = await conversationsApi.createConversation(title.trim(), agentType)
-      navigate(`/conversations/${created.id}`)
+      navigate(`/conversations/${created.id}`, { state: location.state })
     } catch (caught) {
       setFieldError(caught.fieldErrors?.title ?? null)
       setError(friendlyError(caught))
@@ -88,6 +94,13 @@ export default function Conversations() {
           Your saved agent sessions. Only you can see these.
         </p>
       </header>
+
+      {attached && (
+        <Alert variant="info" title="Document attached">
+          <span className="font-medium">{attached.title}</span> will be used as
+          the source. Pick a conversation below, or create a new one.
+        </Alert>
+      )}
 
       <Card title="Start a conversation">
         <form onSubmit={handleCreate} noValidate className="space-y-4">
@@ -132,6 +145,7 @@ export default function Conversations() {
               <li key={conversation.id}>
                 <Link
                   to={`/conversations/${conversation.id}`}
+                  state={location.state}
                   className="flex items-center justify-between gap-4 py-3 transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                 >
                   <div className="min-w-0">

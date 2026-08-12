@@ -9,7 +9,7 @@ import logging
 
 from fastapi import APIRouter
 
-from app.dependencies.auth import CurrentUser
+from app.dependencies.quota import QuotaCheckedUser
 from app.schemas.ai_schemas import AITestRequest
 from app.schemas.common_schemas import SuccessResponse, success
 from app.services.groq_service import groq_service
@@ -28,7 +28,7 @@ router = APIRouter(tags=["AI"])
         "from the server environment and is never accepted from the client."
     ),
 )
-def test_ai(request: AITestRequest, user: CurrentUser) -> dict:
+def test_ai(request: AITestRequest, user: QuotaCheckedUser) -> dict:
     """Send the prompt to Groq and return the generated text.
 
     Failures raise AppError inside the service and are converted to the

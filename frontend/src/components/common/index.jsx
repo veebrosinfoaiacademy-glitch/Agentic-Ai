@@ -211,7 +211,7 @@ const ALERT_PREFIX = {
   warning: 'Warning',
 }
 
-export function Alert({ variant = 'info', title, children }) {
+export function Alert({ variant = 'info', title, children, requestId }) {
   return (
     <div
       role={variant === 'error' ? 'alert' : 'status'}
@@ -220,6 +220,13 @@ export function Alert({ variant = 'info', title, children }) {
       {/* The prefix means the meaning survives without colour. */}
       <p className="font-medium">{title ?? ALERT_PREFIX[variant]}</p>
       {children && <div className="mt-1 leading-relaxed">{children}</div>}
+      {/* The server's correlation id. Shown only on failures, and only so a
+          user can quote it when reporting the problem. */}
+      {requestId && (
+        <p className="mt-2 font-mono text-xs opacity-75">
+          Reference: {requestId}
+        </p>
+      )}
     </div>
   )
 }

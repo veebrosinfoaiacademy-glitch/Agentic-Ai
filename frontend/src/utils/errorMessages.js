@@ -36,6 +36,10 @@ const MESSAGES = {
     'No readable text was found. Scanned or image-only files are not supported.',
   DOCUMENT_EXTRACTION_FAILED: 'That document could not be processed.',
 
+  // Usage limits (ours, not the provider's)
+  USAGE_LIMIT_EXCEEDED:
+    'You have reached your AI usage limit. Please try again after it resets.',
+
   // Infrastructure
   DATABASE_UNAVAILABLE: 'The service is temporarily unavailable. Please try again.',
   DATABASE_NOT_CONFIGURED: 'The database is not configured on the server.',
@@ -55,6 +59,15 @@ export function humanise(value) {
   return String(value)
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/** "in 42 minutes" / "in 3 hours", for quota reset messaging. */
+export function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return 'shortly'
+  if (seconds < 60) return `in ${Math.ceil(seconds)} seconds`
+  if (seconds < 3600) return `in ${Math.ceil(seconds / 60)} minutes`
+  const hours = Math.round(seconds / 3600)
+  return `in ${hours} hour${hours === 1 ? '' : 's'}`
 }
 
 export function formatBytes(bytes) {

@@ -32,11 +32,18 @@ def test_health_returns_ok(unconfigured_db: None) -> None:
 
 
 def test_health_response_structure(unconfigured_db: None) -> None:
-    """The response matches the common success envelope."""
+    """The response matches the common success envelope.
+
+    `ai` was added in Phase 12 so a monitor can see provider readiness, not
+    only database readiness. This assertion is updated deliberately — the
+    contract changed; the test was not weakened.
+    """
     body = client.get("/api/health").json()
 
     assert set(body.keys()) == {"success", "message", "data"}
-    assert set(body["data"].keys()) == {"status", "service", "version", "database"}
+    assert set(body["data"].keys()) == {
+        "status", "service", "version", "database", "ai",
+    }
     assert isinstance(body["message"], str)
 
 
@@ -164,3 +171,55 @@ def test_lifespan_startup_and_shutdown_run_cleanly(unconfigured_db: None) -> Non
     """
     with TestClient(app) as lifespan_client:
         assert lifespan_client.get("/api/health").status_code == 200
+
+
+# --- Phase 12: AI provider readiness ----------------------------------------
+
+
+def test_health_reports_ai_configured(
+    unconfigured_db: None, groq_configured: None
+) -> None:
+    data = client.get("/api/health").json()["data"]
+
+    assert data["ai"]["configured"] is True
+    assert data["ai"]["provider"] == "groq"
+    assert data["ai"]["model"]
+
+
+def test_health_reports_ai_not_configured(
+    unconfigured_db: None, groq_unconfigured: None
+) -> None:
+    """Honest about a missing key rather than silently claiming readiness."""
+    data = client.get("/api/health").json()["data"]
+
+    assert data["ai"]["configured"] is False
+
+
+def test_health_never_exposes_the_api_key(
+    unconfigured_db: None, groq_configured: None
+) -> None:
+    from app.config import settings
+
+    raw = client.get("/api/health").text
+
+    assert settings.GROQ_API_KEY not in raw
+    assert "gsk_" not in raw
+    assert "api_key" not in raw.lower()
+
+
+def test_health_does_not_call_the_provider(
+    unconfigured_db: None, groq_configured: None, recorded_generate
+) -> None:
+    """A health check must not spend provider budget or wait on a third party."""
+    client.get("/api/health")
+
+    assert recorded_generate.calls == []
+
+
+def test_database_status_is_still_accurate_alongside_ai(
+    connected_db: FakeMongoClient,
+) -> None:
+    data = client.get("/api/health").json()["data"]
+
+    assert data["database"]["connected"] is True
+    assert "ai" in data

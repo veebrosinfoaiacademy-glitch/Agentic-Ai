@@ -11,15 +11,24 @@ this service needing to know that agents exist.
 """
 
 import logging
+from datetime import UTC, datetime
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Callable, Protocol
 
+from bson import ObjectId
+from bson.errors import InvalidId
+from pymongo.errors import PyMongoError
+
 from app.config import settings
+from app.database import get_documents_collection
 from app.schemas.document_schemas import (
     ALLOWED_CONTENT_TYPES,
     GENERIC_CONTENT_TYPES,
     DocumentData,
+    DocumentListData,
+    DocumentSummary,
     DocumentType,
+    StoredDocumentData,
 )
 from app.utils.document_extractors import (
     extract_csv,
@@ -233,3 +242,229 @@ class DocumentService:
 
 # Single shared instance, matching the project's service pattern.
 document_service = DocumentService()
+
+
+# --- Persistence (Phase 14) -------------------------------------------------
+#
+# Extraction above is unchanged: the binary is read in memory, validated,
+# turned into normalised text, and discarded. What is new is that the text
+# and its metadata are kept, so a document can be reopened and reused.
+#
+# The original file is still never written anywhere.
+
+
+def _document_not_found() -> AppError:
+    """The document does not exist, or belongs to someone else.
+
+    One error for both, deliberately. Distinguishing them would turn these
+    endpoints into an oracle for which ids exist, so a caller asking about
+    another account's document gets exactly what they would get for an id
+    that was never issued.
+    """
+    return AppError(
+        code="DOCUMENT_NOT_FOUND",
+        message="Document not found",
+        status_code=404,
+    )
+
+
+def _document_database_unavailable(exc: PyMongoError) -> AppError:
+    """MongoDB could not answer.
+
+    Never claims a document was stored when the write failed, and never
+    surfaces the PyMongo message, which carries cluster hostnames.
+    """
+    logger.error("Document database operation failed: %s", type(exc).__name__)
+    return AppError(
+        code="DATABASE_UNAVAILABLE",
+        message="The service is temporarily unavailable. Please try again.",
+        status_code=503,
+    )
+
+
+def _to_object_id(value: str, label: str) -> ObjectId:
+    """Parse an id from a URL, failing cleanly rather than with a 500.
+
+    ObjectId(None) does NOT raise — it silently generates a new random id —
+    so the type check has to come first.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise AppError(code="INVALID_ID", message=f"Invalid {label} id", status_code=422)
+    try:
+        return ObjectId(value)
+    except (InvalidId, TypeError):
+        logger.info("Rejected malformed %s id", label)
+        raise AppError(
+            code="INVALID_ID", message=f"Invalid {label} id", status_code=422
+        ) from None
+
+
+def _summary_fields(document: dict) -> dict:
+    """The public shape of a stored document, minus its text.
+
+    Fields are named explicitly rather than filtered, so a field added to the
+    stored document later cannot leak by omission. `user_id` never crosses
+    this boundary.
+    """
+    return {
+        "id": str(document["_id"]),
+        "title": document["title"],
+        "filename": document["filename"],
+        "extension": document["extension"],
+        "content_type": document["content_type"],
+        "size_bytes": document["size_bytes"],
+        "characters": document["characters"],
+        "metadata": document.get("metadata", {}),
+        "created_at": document["created_at"],
+        "updated_at": document["updated_at"],
+    }
+
+
+class DocumentRepository:
+    """Stores and retrieves documents, always scoped to one user."""
+
+    @staticmethod
+    def _owned(document_id: ObjectId, user_id: ObjectId) -> dict:
+        """The only filter used to reach a document.
+
+        Ownership is part of the query, not a check performed afterwards on
+        the result. A find_one({"_id": ...}) followed by an `if` is one
+        forgotten branch away from an IDOR; this cannot return another
+        user's row at all.
+        """
+        return {"_id": document_id, "user_id": user_id}
+
+    def save(self, user_id: str, extracted: DocumentData) -> StoredDocumentData:
+        """Persist an extracted document for the authenticated user."""
+        owner = _to_object_id(user_id, "user")
+        now = datetime.now(UTC)
+
+        document = {
+            "user_id": owner,
+            # Sanitised at extraction time; the display label starts as the
+            # filename and is the only thing a rename can change.
+            "filename": extracted.filename,
+            "title": extracted.filename,
+            "extension": extracted.extension,
+            "content_type": extracted.content_type,
+            "size_bytes": extracted.size_bytes,
+            "characters": extracted.characters,
+            "text": extracted.text,
+            "metadata": extracted.metadata,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        try:
+            result = get_documents_collection().insert_one(document)
+        except PyMongoError as exc:
+            raise _document_database_unavailable(exc) from None
+
+        document["_id"] = result.inserted_id
+        logger.info(
+            "Document %s stored for user %s (%d characters)",
+            result.inserted_id,
+            owner,
+            extracted.characters,
+        )
+        return StoredDocumentData(**_summary_fields(document), text=document["text"])
+
+    def list_for_user(
+        self, user_id: str, page: int, page_size: int
+    ) -> DocumentListData:
+        """One page of the caller's documents, newest first."""
+        owner = _to_object_id(user_id, "user")
+        collection = get_documents_collection()
+        query = {"user_id": owner}
+
+        try:
+            total = collection.count_documents(query)
+            cursor = (
+                collection.find(query)
+                .sort("created_at", -1)
+                .skip((page - 1) * page_size)
+                .limit(page_size)
+            )
+            documents = list(cursor)
+        except PyMongoError as exc:
+            raise _document_database_unavailable(exc) from None
+
+        return DocumentListData(
+            documents=[DocumentSummary(**_summary_fields(d)) for d in documents],
+            page=page,
+            page_size=page_size,
+            total=total,
+            has_more=(page * page_size) < total,
+        )
+
+    def get_owned(self, user_id: str, document_id: str) -> dict:
+        """Fetch the raw stored document the caller owns, or raise 404.
+
+        Returns the document rather than a schema because callers need
+        different slices of it — the detail endpoint wants everything, the
+        conversation integration wants only the text.
+        """
+        oid = _to_object_id(document_id, "document")
+        owner = _to_object_id(user_id, "user")
+
+        try:
+            document = get_documents_collection().find_one(self._owned(oid, owner))
+        except PyMongoError as exc:
+            raise _document_database_unavailable(exc) from None
+
+        if document is None:
+            logger.info("Document lookup miss or not owned by the caller")
+            raise _document_not_found()
+        return document
+
+    def get_detail(self, user_id: str, document_id: str) -> StoredDocumentData:
+        """A document including its extracted text."""
+        document = self.get_owned(user_id, document_id)
+        return StoredDocumentData(
+            **_summary_fields(document), text=document.get("text", "")
+        )
+
+    def rename(self, user_id: str, document_id: str, title: str) -> DocumentSummary:
+        """Change a document's display title. Nothing else is mutable."""
+        oid = _to_object_id(document_id, "document")
+        owner = _to_object_id(user_id, "user")
+
+        try:
+            document = get_documents_collection().find_one_and_update(
+                self._owned(oid, owner),
+                # An explicit field list, so a crafted request cannot reach
+                # user_id, filename, text or created_at.
+                {"$set": {"title": title, "updated_at": datetime.now(UTC)}},
+                return_document=True,
+            )
+        except PyMongoError as exc:
+            raise _document_database_unavailable(exc) from None
+
+        if document is None:
+            raise _document_not_found()
+
+        logger.info("Document %s renamed", oid)
+        return DocumentSummary(**_summary_fields(document))
+
+    def delete(self, user_id: str, document_id: str) -> None:
+        """Delete a document the caller owns.
+
+        Past conversation messages that referenced it are deliberately left
+        alone: they keep the filename recorded at the time, so a transcript
+        stays readable. History is not rewritten by a later deletion.
+        """
+        oid = _to_object_id(document_id, "document")
+        owner = _to_object_id(user_id, "user")
+
+        try:
+            result = get_documents_collection().delete_one(self._owned(oid, owner))
+        except PyMongoError as exc:
+            raise _document_database_unavailable(exc) from None
+
+        if result.deleted_count == 0:
+            raise _document_not_found()
+
+        logger.info("Document %s deleted", oid)
+
+
+document_repository = DocumentRepository()

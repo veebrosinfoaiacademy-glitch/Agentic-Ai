@@ -5,9 +5,11 @@ filename, no server internals. `filename` is the name the client sent,
 sanitised to a bare basename — never a path we resolved.
 """
 
+from datetime import datetime
 from enum import Enum
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 
 class DocumentType(str, Enum):
@@ -57,3 +59,63 @@ class DocumentData(BaseModel):
         default_factory=dict,
         description="Safe format-specific metadata, e.g. page_count.",
     )
+
+
+# --- Persisted documents (Phase 14) -----------------------------------------
+
+# A title is a display label, not content.
+MAX_TITLE_CHARS = 200
+
+# Pagination bounds, matching the conversation list.
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+
+TitleText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_TITLE_CHARS),
+]
+
+
+class RenameDocumentRequest(BaseModel):
+    """PATCH /api/documents/{id}
+
+    Title is the only mutable field. `filename` records what was actually
+    uploaded and stays immutable, so renaming never rewrites history.
+    """
+
+    title: TitleText
+
+
+class DocumentSummary(BaseModel):
+    """One document in a listing.
+
+    Deliberately without `text`: a page of twenty documents could otherwise
+    carry two megabytes of extracted content nobody asked for.
+    """
+
+    id: str
+    title: str
+    filename: str
+    extension: str
+    content_type: str
+    size_bytes: int = Field(ge=0)
+    characters: int = Field(ge=0)
+    metadata: dict = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class StoredDocumentData(DocumentSummary):
+    """A single document, including its extracted text."""
+
+    text: str
+
+
+class DocumentListData(BaseModel):
+    """GET /api/documents — one page of the caller's own documents."""
+
+    documents: list[DocumentSummary]
+    page: int
+    page_size: int
+    total: int
+    has_more: bool

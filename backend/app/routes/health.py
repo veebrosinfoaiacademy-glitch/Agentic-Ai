@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from app.config import settings
 from app.database import mongodb
 from app.schemas.common_schemas import SuccessResponse, success
+from app.services.groq_service import groq_service
 
 router = APIRouter(tags=["Health"])
 
@@ -31,6 +32,15 @@ def get_health() -> dict:
     mongodb.ping()
     database_status = mongodb.status()
 
+    # Configuration only — whether a key exists and which model is selected.
+    # Never the key itself, and no live provider call: a health check must not
+    # spend provider budget or wait on a third party.
+    ai_status = {
+        "configured": groq_service.is_configured,
+        "model": groq_service.model,
+        "provider": "groq",
+    }
+
     # Not configured is a valid state during early development, so it is not
     # degraded. Configured-but-unreachable is a real problem.
     is_degraded = bool(database_status["configured"]) and not database_status["connected"]
@@ -41,6 +51,7 @@ def get_health() -> dict:
             "service": settings.APP_NAME,
             "version": settings.APP_VERSION,
             "database": database_status,
+            "ai": ai_status,
         },
         message="API is degraded" if is_degraded else "API is healthy",
     )
