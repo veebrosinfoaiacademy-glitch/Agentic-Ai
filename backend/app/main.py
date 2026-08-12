@@ -61,6 +61,15 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             ", ".join(missing),
         )
 
+    # Warn about a weak signing key by length only — the value is never
+    # logged. A short HMAC secret makes token forgery feasible.
+    if settings.jwt_secret_is_weak():
+        logger.warning(
+            "JWT_SECRET is shorter than %d bytes. Generate a strong one with: "
+            "python -c \"import secrets; print(secrets.token_urlsafe(48))\"",
+            settings.MIN_JWT_SECRET_BYTES,
+        )
+
     # connect() reports failure by returning False instead of raising, so a
     # database problem cannot stop the API from booting. /api/health tells
     # the truth about what actually connected.

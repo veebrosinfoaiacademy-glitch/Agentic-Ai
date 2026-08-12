@@ -20,6 +20,7 @@ here — an index on a collection that does not exist yet is noise):
 import logging
 
 from pymongo import MongoClient
+from pymongo.collection import Collection
 from pymongo.database import Database
 from pymongo.errors import (
     ConfigurationError,
@@ -32,6 +33,9 @@ from app.config import settings
 from app.utils.errors import AppError
 
 logger = logging.getLogger("app.database")
+
+# Collection names live here so no other module hardcodes a string.
+USERS_COLLECTION = "users"
 
 # How long to wait for Atlas before giving up. The PyMongo default is 30s,
 # which would make a misconfigured cluster look like a hung server.
@@ -118,6 +122,7 @@ class MongoDB:
         logger.info(
             "MongoDB connected - database '%s'", settings.MONGODB_DB_NAME
         )
+        self.ensure_indexes()
         return True
 
     def ping(self) -> bool:
@@ -160,6 +165,41 @@ class MongoDB:
             )
         return self._client[settings.MONGODB_DB_NAME]
 
+    def ensure_indexes(self) -> None:
+        """Create the indexes the application relies on.
+
+        Idempotent: MongoDB ignores create_index for an index that already
+        exists with the same definition, so this is safe to run on every
+        startup. Never called per request.
+
+        The unique index on users.email is not just an optimisation. Checking
+        "does this email exist?" in application code and then inserting is a
+        race: two simultaneous registrations can both pass the check. The
+        index is what actually guarantees one account per address, and the
+        service treats DuplicateKeyError as the authoritative answer.
+        """
+        if self._client is None or not self._connected:
+            return
+
+        try:
+            database = self.get_database()
+            database[USERS_COLLECTION].create_index(
+                "email", unique=True, name="uniq_email"
+            )
+            logger.info("Database indexes ensured")
+        except PyMongoError as exc:
+            # A failure here must not stop the application from starting; the
+            # affected feature will report its own error when used.
+            logger.error(
+                "Could not ensure indexes (%s): %s",
+                type(exc).__name__,
+                _failure_hint(exc),
+            )
+        except Exception as exc:
+            # connect() promises never to raise. Anything unexpected here must
+            # not take the whole application down at startup.
+            logger.error("Could not ensure indexes (%s)", type(exc).__name__)
+
     def status(self) -> dict[str, object]:
         """Connection state for the health endpoint.
 
@@ -187,3 +227,12 @@ mongodb = MongoDB()
 def get_database() -> Database:
     """Convenience accessor, usable as a FastAPI dependency in later phases."""
     return mongodb.get_database()
+
+
+def get_users_collection() -> Collection:
+    """Handle for the users collection.
+
+    Services call this rather than indexing the database themselves, so the
+    collection name exists in exactly one place.
+    """
+    return mongodb.get_database()[USERS_COLLECTION]

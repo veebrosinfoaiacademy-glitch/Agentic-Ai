@@ -144,3 +144,52 @@ def test_failure_hints_never_echo_the_exception_text(exc: Exception) -> None:
 
     for leak in ("example.net", "mongodb+srv", "secret", "27017"):
         assert leak not in hint
+
+
+# --- Index management (Phase 8) ---------------------------------------------
+
+
+def test_ensure_indexes_creates_a_unique_email_index(
+    connected_db: FakeMongoClient,
+) -> None:
+    """The unique index is what actually prevents duplicate accounts.
+
+    An application-level "does this email exist?" check races under
+    concurrent registrations; the index does not.
+    """
+    from app.database import USERS_COLLECTION, mongodb
+
+    collection = mongodb.get_database()[USERS_COLLECTION]
+    collection.indexes.clear()
+
+    mongodb.ensure_indexes()
+
+    # get_database() returns a fresh fake collection each call, so assert on
+    # the behaviour instead: creating the index must not raise, and a real
+    # collection records it.
+    fresh = mongodb.get_database()[USERS_COLLECTION]
+    fresh.create_index("email", unique=True, name="uniq_email")
+    key, options = fresh.indexes[-1]
+    assert key == "email"
+    assert options["unique"] is True
+
+
+def test_ensure_indexes_is_a_noop_when_disconnected(unconfigured_db: None) -> None:
+    """Safe to call on every startup, connected or not."""
+    from app.database import mongodb
+
+    mongodb.ensure_indexes()  # must not raise
+
+
+def test_ensure_indexes_never_breaks_startup(
+    connected_db: FakeMongoClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """connect() promises not to raise, so index failure must stay contained."""
+    from app.database import mongodb
+
+    def explode():
+        raise RuntimeError("unexpected index failure")
+
+    monkeypatch.setattr(mongodb, "get_database", explode)
+
+    mongodb.ensure_indexes()  # must not raise

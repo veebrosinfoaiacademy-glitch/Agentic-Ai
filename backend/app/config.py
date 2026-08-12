@@ -75,6 +75,16 @@ class Settings(BaseSettings):
         """MAX_UPLOAD_MB converted to bytes, for comparing against file sizes."""
         return self.MAX_UPLOAD_MB * 1024 * 1024
 
+    # RFC 7518 section 3.2: an HMAC key for HS256 should be at least as long
+    # as the hash output, i.e. 32 bytes. A short secret is brute-forceable,
+    # and forging a token is equivalent to logging in as anyone.
+    MIN_JWT_SECRET_BYTES: int = 32
+
+    def jwt_secret_is_weak(self) -> bool:
+        """True when JWT_SECRET is set but shorter than the recommended length."""
+        secret = self.JWT_SECRET
+        return bool(secret) and len(secret.encode()) < self.MIN_JWT_SECRET_BYTES
+
     def missing_secrets(self) -> list[str]:
         """Names of secrets that are not configured yet.
 

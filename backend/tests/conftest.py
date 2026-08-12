@@ -35,6 +35,18 @@ class FakeAdmin:
         return {"ok": 1.0}
 
 
+class FakeDatabase(str):
+    """Stands in for a pymongo Database.
+
+    Subclasses str so existing assertions comparing it to
+    "fake-database:<name>" still hold, while also supporting the
+    `database[collection]` access that index creation needs.
+    """
+
+    def __getitem__(self, name):  # type: ignore[override]
+        return FakeUsersCollection()
+
+
 class FakeMongoClient:
     """Minimal stand-in for pymongo.MongoClient."""
 
@@ -42,8 +54,8 @@ class FakeMongoClient:
         self.admin = FakeAdmin(should_fail)
         self.closed = False
 
-    def __getitem__(self, name: str) -> str:
-        return f"fake-database:{name}"
+    def __getitem__(self, name: str) -> FakeDatabase:
+        return FakeDatabase(f"fake-database:{name}")
 
     def close(self) -> None:
         self.closed = True
@@ -326,6 +338,96 @@ def make_docx_interleaved(blocks: list[tuple[str, object]]) -> bytes:
     buffer = io.BytesIO()
     document.save(buffer)
     return buffer.getvalue()
+
+
+# --- Users collection fake --------------------------------------------------
+#
+# An in-memory stand-in for the MongoDB users collection, including the unique
+# email index. Written by hand rather than pulling in mongomock: it only needs
+# find_one, insert_one and create_index, and the unique-index behaviour is
+# precisely the part worth modelling explicitly.
+
+
+class FakeUsersCollection:
+    """Minimal users collection with a working unique constraint on email."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.documents: list[dict] = []
+        self.fail = fail  # simulate MongoDB being unreachable
+        self.indexes: list[tuple] = []
+
+    def _check(self) -> None:
+        if self.fail:
+            from pymongo.errors import ServerSelectionTimeoutError
+
+            raise ServerSelectionTimeoutError("simulated database outage")
+
+    def create_index(self, key, **kwargs):
+        self.indexes.append((key, kwargs))
+        return kwargs.get("name", str(key))
+
+    def find_one(self, query: dict) -> dict | None:
+        self._check()
+        for document in self.documents:
+            if all(document.get(field) == value for field, value in query.items()):
+                return dict(document)
+        return None
+
+    def insert_one(self, document: dict):
+        self._check()
+
+        # The real safeguard is the unique index, so the fake enforces it the
+        # same way — by rejecting the write, not by checking beforehand.
+        if any(d["email"] == document["email"] for d in self.documents):
+            from pymongo.errors import DuplicateKeyError
+
+            raise DuplicateKeyError("E11000 duplicate key error: email")
+
+        from bson import ObjectId
+
+        stored = dict(document)
+        stored["_id"] = ObjectId()
+        self.documents.append(stored)
+
+        class Result:
+            inserted_id = stored["_id"]
+
+        return Result()
+
+
+@pytest.fixture
+def users(monkeypatch: pytest.MonkeyPatch) -> FakeUsersCollection:
+    """Point the auth service at an in-memory users collection."""
+    collection = FakeUsersCollection()
+    monkeypatch.setattr(
+        "app.services.auth_service.get_users_collection", lambda: collection
+    )
+    return collection
+
+
+@pytest.fixture
+def failing_users(monkeypatch: pytest.MonkeyPatch) -> FakeUsersCollection:
+    """Simulate MongoDB being unreachable during an auth operation."""
+    collection = FakeUsersCollection(fail=True)
+    monkeypatch.setattr(
+        "app.services.auth_service.get_users_collection", lambda: collection
+    )
+    return collection
+
+
+@pytest.fixture
+def jwt_secret(monkeypatch: pytest.MonkeyPatch) -> str:
+    """A throwaway signing secret. Never a real one, and never from .env."""
+    secret = "test-only-signing-secret-not-used-anywhere-real"
+    monkeypatch.setattr(settings, "JWT_SECRET", secret)
+    monkeypatch.setattr(settings, "JWT_ALGORITHM", "HS256")
+    return secret
+
+
+@pytest.fixture
+def no_jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Simulate JWT_SECRET never having been configured."""
+    monkeypatch.setattr(settings, "JWT_SECRET", None)
 
 
 class FakeUpload:
