@@ -56,7 +56,14 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173"
 
     # ---- Uploads ----
+    # Caps the uploaded FILE. Reused for documents rather than adding a second
+    # size setting — two knobs for one limit is how they drift apart.
     MAX_UPLOAD_MB: int = 10
+
+    # Caps the TEXT EXTRACTED from that file, which is a different limit: a
+    # 2 MB PDF can yield far more text than a 2 MB image-heavy one, and it is
+    # the character count, not the file size, that reaches the model later.
+    DOCUMENT_MAX_EXTRACTED_CHARACTERS: int = 100_000
 
     @property
     def cors_origins_list(self) -> list[str]:
