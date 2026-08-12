@@ -107,6 +107,7 @@ class GroqService:
         system_prompt: str | None = None,
         temperature: float = DEFAULT_TEMPERATURE,
         max_tokens: int = DEFAULT_MAX_TOKENS,
+        json_mode: bool = False,
     ) -> GroqResult:
         """Send a chat completion request and return the generated text.
 
@@ -116,6 +117,9 @@ class GroqService:
                 but every agent in later phases will supply one.
             temperature: 0.0 is near-deterministic, higher is more varied.
             max_tokens: Upper bound on the length of the reply.
+            json_mode: Ask the provider to constrain output to valid JSON.
+                This makes malformed JSON much less likely but is not a
+                guarantee — callers must still parse defensively.
 
         Raises:
             AppError: for every failure mode, already mapped to an HTTP
@@ -137,12 +141,19 @@ class GroqService:
             len(user_prompt),
         )
 
+        # Only sent when requested — passing response_format unconditionally
+        # would force JSON on every prose task.
+        extra: dict[str, object] = {}
+        if json_mode:
+            extra["response_format"] = {"type": "json_object"}
+
         try:
             response = client.chat.completions.create(
                 model=self.model,
                 messages=messages,  # type: ignore[arg-type]
                 temperature=temperature,
                 max_completion_tokens=max_tokens,
+                **extra,  # type: ignore[arg-type]
             )
         except Exception as exc:
             raise self._to_app_error(exc) from exc

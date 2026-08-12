@@ -12,7 +12,8 @@ from pymongo.errors import ConnectionFailure
 
 from app.config import settings
 from app.database import mongodb
-from app.services.groq_service import groq_service
+from app.services.groq_service import GroqResult, groq_service
+from app.utils.errors import AppError
 
 FAKE_URI = "mongodb+srv://fake-user:fake-pass@fake-cluster.example.net/"
 FAKE_GROQ_KEY = "gsk_fake_test_key_do_not_use"
@@ -144,6 +145,71 @@ def install_fake_groq(result: object | Exception) -> FakeGroqClient:
     fake = FakeGroqClient(result)
     groq_service._client = fake
     return fake
+
+
+# --- Agent-level fake -------------------------------------------------------
+#
+# Agent and route tests do not care how the SDK behaves — that is covered in
+# test_groq_service.py. They replace GroqService.generate outright and inspect
+# what the agent asked for.
+
+
+class GenerateRecorder:
+    """Records every call to groq_service.generate and returns a canned result."""
+
+    def __init__(
+        self,
+        content: str = "Generated content.",
+        error: Exception | None = None,
+    ) -> None:
+        self.content = content
+        self.error = error
+        self.calls: list[dict] = []
+
+    def __call__(self, **kwargs: object) -> GroqResult:
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return GroqResult(
+            content=self.content,
+            model=FAKE_MODEL,
+            usage={"prompt_tokens": 30, "completion_tokens": 70, "total_tokens": 100},
+        )
+
+    @property
+    def last(self) -> dict:
+        """The keyword arguments of the most recent call."""
+        return self.calls[-1]
+
+    @property
+    def system_prompt(self) -> str:
+        return str(self.last.get("system_prompt", ""))
+
+    @property
+    def user_prompt(self) -> str:
+        return str(self.last.get("user_prompt", ""))
+
+
+@pytest.fixture
+def recorded_generate(monkeypatch: pytest.MonkeyPatch) -> GenerateRecorder:
+    """Replace the AI call with a recorder. No network, no API key needed."""
+    recorder = GenerateRecorder()
+    monkeypatch.setattr(groq_service, "generate", recorder)
+    return recorder
+
+
+@pytest.fixture
+def failing_generate(monkeypatch: pytest.MonkeyPatch) -> GenerateRecorder:
+    """Simulate the AI service raising a provider error."""
+    recorder = GenerateRecorder(
+        error=AppError(
+            code="AI_PROVIDER_ERROR",
+            message="AI service is temporarily unavailable",
+            status_code=502,
+        )
+    )
+    monkeypatch.setattr(groq_service, "generate", recorder)
+    return recorder
 
 
 @pytest.fixture
