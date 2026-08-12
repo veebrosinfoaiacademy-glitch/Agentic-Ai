@@ -97,7 +97,7 @@ git-ignored — never commit it.
 - [x] **Phase 4** — Groq API integration — verified against the live API
 - [x] **Phase 5** — Content Agent (7 tasks) — verified against the live API
 - [x] **Phase 6** — Developer Agent (7 tasks) — verified against the live API
-- [ ] Phase 7 — Document upload and processing
+- [x] **Phase 7** — Document upload and extraction (txt, md, csv, pdf, docx)
 - [ ] Phase 8 — Authentication
 - [ ] Phase 9 — Frontend dashboard and agent interfaces
 - [ ] Phase 10 — Frontend/backend integration
