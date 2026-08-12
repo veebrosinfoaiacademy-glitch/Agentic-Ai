@@ -37,7 +37,15 @@ pytest
 ```bash
 cd frontend
 npm install
+cp .env.example .env    # VITE_API_BASE_URL only — never provider secrets
 npm run dev
+```
+
+Run the frontend tests:
+
+```bash
+cd frontend
+npm test
 ```
 
 - App: http://localhost:5173
@@ -86,6 +94,11 @@ git-ignored — never commit it.
 | `JWT_EXPIRE_MINUTES` | Phase 8 | Token lifetime |
 | `CORS_ORIGINS` | Phase 2 | Comma-separated allowed origins |
 | `MAX_UPLOAD_MB` | Phase 7 | Upload size limit |
+| `DOCUMENT_MAX_EXTRACTED_CHARACTERS` | Phase 7 | Extracted text limit |
+
+Frontend (`frontend/.env`) takes only `VITE_API_BASE_URL`. Provider secrets
+must never appear there — the browser talks to FastAPI, and FastAPI talks to
+Groq and MongoDB.
 
 ---
 
@@ -99,7 +112,7 @@ git-ignored — never commit it.
 - [x] **Phase 6** — Developer Agent (7 tasks) — verified against the live API
 - [x] **Phase 7** — Document upload and extraction (txt, md, csv, pdf, docx)
 - [x] **Phase 8** — Authentication (Argon2id + JWT), verified against live Atlas
-- [ ] Phase 9 — Frontend dashboard and agent interfaces
+- [x] **Phase 9** — React dashboard, agent interfaces, auth UI (45 frontend tests)
 - [ ] Phase 10 — Frontend/backend integration
 - [ ] Phase 11 — Conversation history
 - [ ] Phase 12 — Testing and error handling
