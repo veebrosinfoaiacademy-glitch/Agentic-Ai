@@ -1,0 +1,63 @@
+# Render blueprint for the FastAPI backend.
+#
+# Chosen over a Dockerfile deliberately: Render's native Python runtime builds
+# straight from requirements.txt, so a container would add a build step and an
+# image to maintain without changing what actually runs.
+#
+# No secret values appear here. Every `sync: false` entry must be set in the
+# Render dashboard (or via `render env`), which keeps them out of git entirely.
+services:
+  - type: web
+    name: ai-productivity-agents-api
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+
+    buildCommand: pip install -r requirements.txt
+    # No --reload: it watches the filesystem and forks workers, neither of
+    # which belongs in production. $PORT is supplied by Render.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
+    # Render restarts the service if this stops returning 2xx. The endpoint is
+    # public and reports dependency status without exposing configuration.
+    healthCheckPath: /api/health
+
+    envVars:
+      # ---- Secrets: set in the dashboard, never committed ----
+      - key: GROQ_API_KEY
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        # Render generates a strong value on first deploy, so no human ever
+        # handles it. Rotating it invalidates existing tokens, which is the
+        # intended behaviour for a stateless-JWT design.
+        generateValue: true
+
+      # ---- Safe, non-secret configuration ----
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: MONGODB_DB_NAME
+        value: ai_productivity_agents
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_EXPIRE_MINUTES
+        value: "1440"
+      # Must be the deployed frontend origin. Never "*" — that is invalid
+      # with credentials and would open the API to any site.
+      - key: CORS_ORIGINS
+        sync: false
+      - key: AI_RATE_LIMIT_PER_HOUR
+        value: "100"
+      - key: AI_RATE_LIMIT_PER_DAY
+        value: "500"
+      - key: MAX_UPLOAD_MB
+        value: "10"
+      - key: DOCUMENT_MAX_EXTRACTED_CHARACTERS
+        value: "100000"
+      # Production: keeps application loggers at INFO rather than DEBUG.
+      - key: DEBUG
+        value: "false"
+      - key: PYTHON_VERSION
+        value: "3.13.1"

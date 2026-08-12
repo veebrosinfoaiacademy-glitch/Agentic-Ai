@@ -22,6 +22,7 @@ from app.routes import api_router
 from app.services.groq_service import groq_service
 from app.services.usage_service import usage_service
 from app.utils.errors import register_exception_handlers
+from app.utils.security_headers import SecurityHeadersMiddleware
 from app.utils.request_context import (
     REQUEST_ID_HEADER,
     RequestIdFilter,
@@ -129,6 +130,10 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["*"],
     )
+
+    # Outermost of our own middleware, so the headers land on every
+    # response — including error envelopes produced further in.
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # --- Correlation and quota middleware ---
     # Registration order matters: Starlette runs the LAST-registered
