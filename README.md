@@ -81,7 +81,7 @@ git-ignored — never commit it.
 | `GROQ_MODEL` | Phase 4 | Which LLM to call |
 | `MONGODB_URI` | Phase 3 | MongoDB Atlas connection string |
 | `MONGODB_DB_NAME` | Phase 3 | Database name |
-| `JWT_SECRET` | Phase 8 | Signing key for auth tokens |
+| `JWT_SECRET` | Phase 8 | Signing key for auth tokens (use 32+ bytes) |
 | `JWT_ALGORITHM` | Phase 8 | Token algorithm (HS256) |
 | `JWT_EXPIRE_MINUTES` | Phase 8 | Token lifetime |
 | `CORS_ORIGINS` | Phase 2 | Comma-separated allowed origins |
@@ -98,7 +98,7 @@ git-ignored — never commit it.
 - [x] **Phase 5** — Content Agent (7 tasks) — verified against the live API
 - [x] **Phase 6** — Developer Agent (7 tasks) — verified against the live API
 - [x] **Phase 7** — Document upload and extraction (txt, md, csv, pdf, docx)
-- [ ] Phase 8 — Authentication
+- [x] **Phase 8** — Authentication (Argon2id + JWT), verified against live Atlas
 - [ ] Phase 9 — Frontend dashboard and agent interfaces
 - [ ] Phase 10 — Frontend/backend integration
 - [ ] Phase 11 — Conversation history
