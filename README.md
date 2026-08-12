@@ -96,7 +96,7 @@ git-ignored — never commit it.
 - [x] **Phase 3** — MongoDB Atlas + PyMongo — verified against a live cluster
 - [x] **Phase 4** — Groq API integration — verified against the live API
 - [x] **Phase 5** — Content Agent (7 tasks) — verified against the live API
-- [ ] Phase 6 — Developer Productivity Agent
+- [x] **Phase 6** — Developer Agent (7 tasks) — verified against the live API
 - [ ] Phase 7 — Document upload and processing
 - [ ] Phase 8 — Authentication
 - [ ] Phase 9 — Frontend dashboard and agent interfaces
