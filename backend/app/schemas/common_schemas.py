@@ -54,12 +54,25 @@ class ErrorResponse(BaseModel):
     }
 
 
+class DatabaseStatus(BaseModel):
+    """Database connectivity reported by the health endpoint.
+
+    Booleans only. Nothing here may ever carry a URI, host, username or
+    password — this payload is public to anyone who can reach /api/health.
+    """
+
+    configured: bool = Field(description="Whether MONGODB_URI is set")
+    connected: bool = Field(description="Whether the last ping succeeded")
+    type: str = Field(default="mongodb", description="Database engine")
+
+
 class HealthData(BaseModel):
     """Payload returned inside the health endpoint's `data` field."""
 
-    status: str
+    status: str = Field(description='"ok" when healthy, "degraded" otherwise')
     service: str
     version: str
+    database: DatabaseStatus
 
 
 def success(data: Any = None, message: str = "Request successful") -> dict[str, Any]:

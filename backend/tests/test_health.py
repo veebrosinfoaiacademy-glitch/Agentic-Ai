@@ -1,4 +1,4 @@
-"""Phase 2 tests: application boots, health endpoint works, errors are shaped.
+"""Tests for the application shell and the /api/health endpoint.
 
 TestClient runs the real FastAPI app in-process — no server needs to be
 running, and no network calls are made.
@@ -7,18 +7,22 @@ running, and no network calls are made.
 from fastapi.testclient import TestClient
 
 from app.main import app
+from tests.conftest import FakeMongoClient
 
 client = TestClient(app)
 
 
+# --- Phase 2: application shell ---------------------------------------------
+
+
 def test_app_imports_and_has_metadata() -> None:
-    """Test 3: the application object can be imported without errors."""
+    """The application object can be imported without errors."""
     assert app.title
     assert app.version
 
 
-def test_health_returns_ok() -> None:
-    """Test 1: GET /api/health returns 200 with success=True and status ok."""
+def test_health_returns_ok(unconfigured_db: None) -> None:
+    """GET /api/health returns 200 with success=True and status ok."""
     response = client.get("/api/health")
 
     assert response.status_code == 200
@@ -27,20 +31,28 @@ def test_health_returns_ok() -> None:
     assert body["data"]["status"] == "ok"
 
 
-def test_health_response_structure() -> None:
-    """Test 2: the response matches the common success envelope."""
+def test_health_response_structure(unconfigured_db: None) -> None:
+    """The response matches the common success envelope."""
     body = client.get("/api/health").json()
 
     assert set(body.keys()) == {"success", "message", "data"}
-    assert set(body["data"].keys()) == {"status", "service", "version"}
+    assert set(body["data"].keys()) == {"status", "service", "version", "database"}
     assert isinstance(body["message"], str)
 
 
-def test_health_does_not_leak_secrets() -> None:
+def test_health_does_not_leak_secrets(connected_db: FakeMongoClient) -> None:
     """The health payload must never echo configuration secrets."""
     raw = client.get("/api/health").text.lower()
 
-    for secret_name in ("groq_api_key", "mongodb_uri", "jwt_secret", "password"):
+    for secret_name in (
+        "groq_api_key",
+        "mongodb_uri",
+        "jwt_secret",
+        "password",
+        "mongodb+srv",
+        "fake-cluster",
+        "fake-user",
+    ):
         assert secret_name not in raw
 
 
@@ -62,10 +74,75 @@ def test_openapi_schema_is_available() -> None:
     assert "/api/health" in response.json()["paths"]
 
 
-def test_cors_headers_present_for_allowed_origin() -> None:
+def test_cors_headers_present_for_allowed_origin(unconfigured_db: None) -> None:
     """The React dev origin is echoed back by the CORS middleware."""
-    response = client.get(
-        "/api/health", headers={"Origin": "http://localhost:5173"}
-    )
+    response = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
 
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+# --- Phase 3: database status in the health payload -------------------------
+
+
+def test_health_reports_database_not_configured(unconfigured_db: None) -> None:
+    """No URI set: honest about being unconfigured, but still 'ok'."""
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "ok"
+    assert data["database"] == {
+        "configured": False,
+        "connected": False,
+        "type": "mongodb",
+    }
+
+
+def test_health_reports_database_connected(connected_db: FakeMongoClient) -> None:
+    """Test 4: configured and reachable."""
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "ok"
+    assert data["database"] == {
+        "configured": True,
+        "connected": True,
+        "type": "mongodb",
+    }
+
+
+def test_health_reports_degraded_when_database_unreachable(
+    failing_db: FakeMongoClient,
+) -> None:
+    """Configured but unreachable is 'degraded' — still HTTP 200."""
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["status"] == "degraded"
+    assert body["data"]["database"] == {
+        "configured": True,
+        "connected": False,
+        "type": "mongodb",
+    }
+
+
+def test_health_pings_live_rather_than_caching_startup_state(
+    connected_db: FakeMongoClient,
+) -> None:
+    """Each health call re-checks the database instead of trusting startup."""
+    client.get("/api/health")
+    client.get("/api/health")
+
+    assert connected_db.admin.ping_count == 2
+
+
+def test_lifespan_startup_and_shutdown_run_cleanly(unconfigured_db: None) -> None:
+    """Using TestClient as a context manager triggers the lifespan hooks.
+
+    With no URI configured this must still start and stop without raising.
+    """
+    with TestClient(app) as lifespan_client:
+        assert lifespan_client.get("/api/health").status_code == 200

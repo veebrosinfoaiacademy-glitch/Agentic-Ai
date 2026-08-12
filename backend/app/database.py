@@ -1,12 +1,189 @@
-"""MongoDB Atlas connection.
+"""MongoDB Atlas connection, managed for the lifetime of the application.
 
-Placeholder for Phase 3. It exists now so the import path is stable and the
-project structure is complete, but it deliberately holds no connection logic
-yet — Phase 2 must start without a database.
+One MongoClient is created at startup and reused for every request. This
+matters: MongoClient owns an internal connection pool, so creating one per
+request would open and discard TCP connections constantly and exhaust Atlas's
+connection limit on the free tier.
 
-Phase 3 will add:
-    - a PyMongo MongoClient built from settings.MONGODB_URI
-    - typed collection handles (users, conversations, documents, code_reviews)
-    - index creation on startup
-    - a ping() helper used by the /api/health endpoint
+Nothing outside this module should import pymongo or know the connection
+string exists. Routes and services ask for `get_database()` and get a handle.
+
+Planned indexes (created in the phase that introduces each collection, not
+here — an index on a collection that does not exist yet is noise):
+
+    users           email                  -> unique
+    conversations   user_id + created_at   -> compound
+    documents       user_id + created_at   -> compound
+    code_reviews    user_id + created_at   -> compound
 """
+
+import logging
+
+from pymongo import MongoClient
+from pymongo.database import Database
+from pymongo.errors import (
+    ConfigurationError,
+    OperationFailure,
+    PyMongoError,
+    ServerSelectionTimeoutError,
+)
+
+from app.config import settings
+from app.utils.errors import AppError
+
+logger = logging.getLogger("app.database")
+
+# How long to wait for Atlas before giving up. The PyMongo default is 30s,
+# which would make a misconfigured cluster look like a hung server.
+SERVER_SELECTION_TIMEOUT_MS = 5000
+CONNECT_TIMEOUT_MS = 5000
+
+
+def _failure_hint(exc: PyMongoError) -> str:
+    """Turn a PyMongo exception into a safe, actionable log message.
+
+    We deliberately return our own text rather than str(exc). PyMongo error
+    messages embed the cluster hostnames and replica set topology, and we do
+    not want those in logs that might be shared or shipped somewhere.
+    """
+    if isinstance(exc, OperationFailure):
+        return "authentication failed - check the database username and password"
+    if isinstance(exc, ServerSelectionTimeoutError):
+        return (
+            "could not reach the cluster - check Atlas Network Access allows "
+            "your IP address and the cluster is running"
+        )
+    if isinstance(exc, ConfigurationError):
+        return "invalid connection string format - check MONGODB_URI"
+    return "unexpected database error"
+
+
+class MongoDB:
+    """Holds the single MongoClient and reports its state.
+
+    State lives on one instance rather than in loose module-level variables,
+    so tests can swap it out and there is exactly one owner of the client.
+    """
+
+    def __init__(self) -> None:
+        self._client: MongoClient | None = None
+        self._connected: bool = False
+
+    @property
+    def is_configured(self) -> bool:
+        """True when MONGODB_URI has been set in the environment."""
+        return bool(settings.MONGODB_URI)
+
+    @property
+    def is_connected(self) -> bool:
+        """Result of the most recent ping. Not re-checked here."""
+        return self._connected
+
+    def connect(self) -> bool:
+        """Create the client and verify the connection with a ping.
+
+        Returns True on success. Never raises: a missing or broken database
+        should not stop the API process from starting (see docs/ and the
+        Phase 3 notes for why).
+        """
+        if not self.is_configured:
+            logger.warning(
+                "MONGODB_URI is not set - starting without a database. "
+                "Database-backed features will be unavailable."
+            )
+            self._connected = False
+            return False
+
+        try:
+            self._client = MongoClient(
+                settings.MONGODB_URI,
+                serverSelectionTimeoutMS=SERVER_SELECTION_TIMEOUT_MS,
+                connectTimeoutMS=CONNECT_TIMEOUT_MS,
+                appname="ai-productivity-agents",
+            )
+            # Constructing MongoClient is lazy — it does no network I/O and
+            # succeeds even against a hostname that does not exist. The ping
+            # is what actually proves we can talk to Atlas.
+            self._client.admin.command("ping")
+        except PyMongoError as exc:
+            self._connected = False
+            logger.error(
+                "MongoDB connection failed (%s): %s",
+                type(exc).__name__,
+                _failure_hint(exc),
+            )
+            return False
+
+        self._connected = True
+        logger.info(
+            "MongoDB connected - database '%s'", settings.MONGODB_DB_NAME
+        )
+        return True
+
+    def ping(self) -> bool:
+        """Re-check connectivity right now and update the cached state.
+
+        Called by the health endpoint so it reports live truth rather than
+        whatever happened at startup. If the cluster went down after startup
+        this flips to False; if it recovered, this flips back to True.
+        """
+        if not self.is_configured or self._client is None:
+            self._connected = False
+            return False
+
+        try:
+            self._client.admin.command("ping")
+        except PyMongoError as exc:
+            if self._connected:
+                logger.error(
+                    "MongoDB ping failed (%s): %s",
+                    type(exc).__name__,
+                    _failure_hint(exc),
+                )
+            self._connected = False
+            return False
+
+        self._connected = True
+        return True
+
+    def get_database(self) -> Database:
+        """Return the database handle for services to query.
+
+        Raises AppError (-> 503 through the Phase 2 handlers) when the
+        database is unusable, so callers never get a None they forgot to check.
+        """
+        if self._client is None or not self.is_configured:
+            raise AppError(
+                code="DATABASE_NOT_CONFIGURED",
+                message="Database is not configured",
+                status_code=503,
+            )
+        return self._client[settings.MONGODB_DB_NAME]
+
+    def status(self) -> dict[str, object]:
+        """Connection state for the health endpoint.
+
+        Reports booleans only — never the URI, host, username or password.
+        """
+        return {
+            "configured": self.is_configured,
+            "connected": self._connected,
+            "type": "mongodb",
+        }
+
+    def close(self) -> None:
+        """Release the connection pool on application shutdown."""
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+            logger.info("MongoDB connection closed")
+        self._connected = False
+
+
+# The single application-wide instance.
+mongodb = MongoDB()
+
+
+def get_database() -> Database:
+    """Convenience accessor, usable as a FastAPI dependency in later phases."""
+    return mongodb.get_database()

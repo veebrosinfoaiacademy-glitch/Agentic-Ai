@@ -16,13 +16,26 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.database import mongodb
 from app.routes import api_router
 from app.utils.errors import register_exception_handlers
 
+# Root stays at INFO. Setting the root logger to DEBUG would also switch on
+# DEBUG for every third-party library, and PyMongo's debug stream in
+# particular dumps cluster hostnames and topology on every operation — noise
+# we do not want, and connection details we do not want written to disk.
 logging.basicConfig(
-    level=logging.DEBUG if settings.DEBUG else logging.INFO,
+    level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
 )
+
+# Only our own loggers follow the DEBUG flag.
+logging.getLogger("app").setLevel(logging.DEBUG if settings.DEBUG else logging.INFO)
+
+# Chatty dependencies are pinned to WARNING regardless.
+for noisy in ("pymongo", "httpx", "httpcore"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
+
 logger = logging.getLogger("app")
 
 API_PREFIX = "/api"
@@ -32,7 +45,9 @@ API_PREFIX = "/api"
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Run once on startup, and once on shutdown after the `yield`.
 
-    Phase 3 will open the MongoDB connection here and close it on shutdown.
+    Opening the MongoDB client here — rather than per request — means one
+    connection pool is shared by the whole process and is closed cleanly when
+    the server stops.
     """
     logger.info("%s v%s starting", settings.APP_NAME, settings.APP_VERSION)
     logger.info("CORS allowed origins: %s", settings.cors_origins_list)
@@ -45,8 +60,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             ", ".join(missing),
         )
 
+    # connect() reports failure by returning False instead of raising, so a
+    # database problem cannot stop the API from booting. /api/health tells
+    # the truth about what actually connected.
+    mongodb.connect()
+
     yield
 
+    mongodb.close()
     logger.info("%s shutting down", settings.APP_NAME)
 
 
