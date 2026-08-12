@@ -417,6 +417,179 @@ def failing_users(monkeypatch: pytest.MonkeyPatch) -> FakeUsersCollection:
     return collection
 
 
+# --- Generic collection fake (conversations, messages) ----------------------
+#
+# Enough of the PyMongo surface for the conversation service: filtered reads,
+# sort/skip/limit, counts, atomic update, and both delete forms. Written by
+# hand rather than adding mongomock — the ownership filtering these tests
+# exist to prove is exactly the part worth modelling explicitly.
+
+
+class FakeCursor:
+    def __init__(self, documents: list[dict]) -> None:
+        self._documents = documents
+
+    def sort(self, key, direction: int = 1) -> "FakeCursor":
+        self._documents.sort(key=lambda d: d.get(key), reverse=direction == -1)
+        return self
+
+    def skip(self, count: int) -> "FakeCursor":
+        self._documents = self._documents[count:]
+        return self
+
+    def limit(self, count: int) -> "FakeCursor":
+        self._documents = self._documents[:count]
+        return self
+
+    def __iter__(self):
+        return iter(self._documents)
+
+
+class FakeCollection:
+    """In-memory stand-in for a PyMongo collection."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.documents: list[dict] = []
+        self.fail = fail
+        self.indexes: list[tuple] = []
+        # Records every filter used for a read or write, so tests can assert
+        # that ownership was part of the query rather than checked afterwards.
+        self.queries: list[dict] = []
+
+    def _check(self) -> None:
+        if self.fail:
+            from pymongo.errors import ServerSelectionTimeoutError
+
+            raise ServerSelectionTimeoutError("simulated database outage")
+
+    @staticmethod
+    def _matches(document: dict, query: dict) -> bool:
+        return all(document.get(field) == value for field, value in query.items())
+
+    def create_index(self, key, **kwargs):
+        self.indexes.append((key, kwargs))
+        return kwargs.get("name", str(key))
+
+    def insert_one(self, document: dict):
+        self._check()
+        from bson import ObjectId
+
+        stored = dict(document)
+        stored.setdefault("_id", ObjectId())
+        self.documents.append(stored)
+
+        class Result:
+            inserted_id = stored["_id"]
+
+        return Result()
+
+    def find_one(self, query: dict) -> dict | None:
+        self._check()
+        self.queries.append(dict(query))
+        for document in self.documents:
+            if self._matches(document, query):
+                return dict(document)
+        return None
+
+    def find(self, query: dict) -> FakeCursor:
+        self._check()
+        self.queries.append(dict(query))
+        return FakeCursor(
+            [dict(d) for d in self.documents if self._matches(d, query)]
+        )
+
+    def count_documents(self, query: dict) -> int:
+        self._check()
+        self.queries.append(dict(query))
+        return sum(1 for d in self.documents if self._matches(d, query))
+
+    def find_one_and_update(self, query: dict, update: dict, **kwargs) -> dict | None:
+        self._check()
+        self.queries.append(dict(query))
+        for document in self.documents:
+            if self._matches(document, query):
+                document.update(update.get("$set", {}))
+                return dict(document)
+        return None
+
+    def update_one(self, query: dict, update: dict):
+        self._check()
+        self.queries.append(dict(query))
+        modified = 0
+        for document in self.documents:
+            if self._matches(document, query):
+                document.update(update.get("$set", {}))
+                modified = 1
+                break
+
+        class Result:
+            modified_count = modified
+
+        return Result()
+
+    def delete_one(self, query: dict):
+        self._check()
+        self.queries.append(dict(query))
+        for index, document in enumerate(self.documents):
+            if self._matches(document, query):
+                del self.documents[index]
+
+                class Result:
+                    deleted_count = 1
+
+                return Result()
+
+        class Empty:
+            deleted_count = 0
+
+        return Empty()
+
+    def delete_many(self, query: dict):
+        self._check()
+        self.queries.append(dict(query))
+        before = len(self.documents)
+        self.documents = [d for d in self.documents if not self._matches(d, query)]
+        removed = before - len(self.documents)
+
+        class Result:
+            deleted_count = removed
+
+        return Result()
+
+
+@pytest.fixture
+def conversations(monkeypatch: pytest.MonkeyPatch) -> FakeCollection:
+    """In-memory conversations collection wired into the service."""
+    collection = FakeCollection()
+    monkeypatch.setattr(
+        "app.services.conversation_service.get_conversations_collection",
+        lambda: collection,
+    )
+    return collection
+
+
+@pytest.fixture
+def messages(monkeypatch: pytest.MonkeyPatch) -> FakeCollection:
+    """In-memory messages collection wired into the service."""
+    collection = FakeCollection()
+    monkeypatch.setattr(
+        "app.services.conversation_service.get_messages_collection",
+        lambda: collection,
+    )
+    return collection
+
+
+@pytest.fixture
+def failing_conversations(monkeypatch: pytest.MonkeyPatch) -> FakeCollection:
+    """Simulate MongoDB being unreachable for conversation operations."""
+    collection = FakeCollection(fail=True)
+    monkeypatch.setattr(
+        "app.services.conversation_service.get_conversations_collection",
+        lambda: collection,
+    )
+    return collection
+
+
 @pytest.fixture
 def authenticated() -> Iterator[UserData]:
     """Sign the test client in for modules that test behaviour, not auth.

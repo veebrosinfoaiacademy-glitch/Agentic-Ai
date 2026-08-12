@@ -36,6 +36,8 @@ logger = logging.getLogger("app.database")
 
 # Collection names live here so no other module hardcodes a string.
 USERS_COLLECTION = "users"
+CONVERSATIONS_COLLECTION = "conversations"
+MESSAGES_COLLECTION = "messages"
 
 # How long to wait for Atlas before giving up. The PyMongo default is 30s,
 # which would make a misconfigured cluster look like a hung server.
@@ -186,6 +188,24 @@ class MongoDB:
             database[USERS_COLLECTION].create_index(
                 "email", unique=True, name="uniq_email"
             )
+
+            # Every conversation query filters by user_id, so it leads both
+            # indexes. Sorting by updated_at descending serves the list view
+            # directly from the index rather than sorting in memory.
+            database[CONVERSATIONS_COLLECTION].create_index(
+                [("user_id", 1), ("updated_at", -1)], name="user_recent"
+            )
+
+            # Transcript reads: all messages for one conversation, oldest
+            # first. conversation_id alone would do, but including user_id
+            # means the ownership filter is also covered by the index.
+            database[MESSAGES_COLLECTION].create_index(
+                [("conversation_id", 1), ("created_at", 1)], name="conversation_timeline"
+            )
+            database[MESSAGES_COLLECTION].create_index(
+                [("user_id", 1), ("conversation_id", 1)], name="user_conversation"
+            )
+
             logger.info("Database indexes ensured")
         except PyMongoError as exc:
             # A failure here must not stop the application from starting; the
@@ -236,3 +256,13 @@ def get_users_collection() -> Collection:
     collection name exists in exactly one place.
     """
     return mongodb.get_database()[USERS_COLLECTION]
+
+
+def get_conversations_collection() -> Collection:
+    """Handle for the conversations collection."""
+    return mongodb.get_database()[CONVERSATIONS_COLLECTION]
+
+
+def get_messages_collection() -> Collection:
+    """Handle for the messages collection."""
+    return mongodb.get_database()[MESSAGES_COLLECTION]

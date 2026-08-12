@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: '/content', label: 'Content Agent', icon: '✎' },
   { to: '/developer', label: 'Developer Agent', icon: '⌘' },
   { to: '/documents', label: 'Documents', icon: '⬒' },
+  { to: '/conversations', label: 'Conversations', icon: '☰' },
 ]
 
 function NavItems({ onNavigate }) {
@@ -109,7 +110,8 @@ export default function AppLayout() {
             <span aria-hidden="true">☰</span>
           </Button>
           <p className="truncate text-sm font-medium text-slate-700">
-            {NAV_ITEMS.find((item) => item.to === location.pathname)?.label ?? 'Overview'}
+            {NAV_ITEMS.find((item) => location.pathname.startsWith(item.to))?.label ??
+              'Overview'}
           </p>
         </header>
 

@@ -118,8 +118,12 @@ and no request schema accepts one.
 | `GET /api/documents/supported-types` | Global server configuration, no user data |
 
 **Protected** (`Authorization: Bearer <token>`): `GET /api/auth/me`, all 7
-`/api/content/*`, all 7 `/api/developer/*`, `POST /api/documents/upload`, and
-`POST /api/ai/test`.
+`/api/content/*`, all 7 `/api/developer/*`, `POST /api/documents/upload`,
+`POST /api/ai/test`, and all 6 `/api/conversations` routes.
+
+Conversations are user-owned. Every query carries the owner as part of the
+filter, so another account's conversation is indistinguishable from one
+that never existed — both return 404.
 
 Authentication is resolved **before** the request reaches Groq, the document
 extractor or any user-owned database read, so an anonymous request can never
@@ -161,7 +165,7 @@ working when it expires or its account is deleted.
 - [x] **Phase 8** — Authentication (Argon2id + JWT), verified against live Atlas
 - [x] **Phase 9** — React dashboard, agent interfaces, auth UI (45 frontend tests)
 - [x] **Phase 10** — Protected AI/document APIs, JWT-derived identity
-- [ ] Phase 11 — Conversation history
+- [x] **Phase 11** — Conversation history and persistent AI sessions
 - [ ] Phase 12 — Testing and error handling
 - [ ] Phase 13 — Deployment
 - [ ] Phase 14 — Documentation

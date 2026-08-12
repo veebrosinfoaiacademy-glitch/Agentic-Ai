@@ -1,6 +1,10 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import { listConversations } from '../api/conversations'
+import { Badge, Card, EmptyState, Spinner } from '../components/common'
 import { useAuth } from '../context/useAuth'
+import { humanise } from '../utils/errorMessages'
 
 /**
  * Deliberately free of statistics.
@@ -35,6 +39,74 @@ const AGENTS = [
     icon: '⬒',
   },
 ]
+
+/** Real data from the API — still no invented metrics. */
+function RecentConversations() {
+  const [conversations, setConversations] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    listConversations({ pageSize: 5 })
+      .then((data) => {
+        if (!cancelled) setConversations(data.conversations)
+      })
+      .catch(() => {
+        // Non-fatal: the dashboard's agent cards still work.
+        if (!cancelled) setConversations([])
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return (
+    <Card
+      title="Recent conversations"
+      actions={
+        <Link
+          to="/conversations"
+          className="text-sm font-medium text-indigo-600 underline-offset-2 hover:underline"
+        >
+          View all
+        </Link>
+      }
+    >
+      {isLoading ? (
+        <div className="flex items-center justify-center gap-3 py-6 text-slate-500">
+          <Spinner />
+          <span className="text-sm">Loading…</span>
+        </div>
+      ) : conversations.length === 0 ? (
+        <EmptyState
+          title="No conversations yet"
+          description="Saved agent sessions will appear here."
+        />
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {conversations.map((conversation) => (
+            <li key={conversation.id}>
+              <Link
+                to={`/conversations/${conversation.id}`}
+                className="flex items-center justify-between gap-4 py-2.5 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+              >
+                <span className="truncate text-sm text-slate-800">
+                  {conversation.title}
+                </span>
+                <Badge tone={conversation.agent_type === 'content' ? 'indigo' : 'sky'}>
+                  {humanise(conversation.agent_type)}
+                </Badge>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  )
+}
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -84,6 +156,8 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      <RecentConversations />
 
       <p className="text-xs text-slate-400">
         Requests are sent to your own backend, which calls the AI provider. No

@@ -4,6 +4,8 @@ import AppLayout from './components/layout/AppLayout'
 import { RequireAuth, RequireGuest } from './components/layout/RouteGuards'
 import { AuthProvider } from './context/AuthContext'
 import ContentAgent from './pages/ContentAgent'
+import ConversationDetail from './pages/ConversationDetail'
+import Conversations from './pages/Conversations'
 import Dashboard from './pages/Dashboard'
 import DeveloperAgent from './pages/DeveloperAgent'
 import Documents from './pages/Documents'
@@ -47,6 +49,8 @@ export default function App() {
           <Route path="/content" element={<ContentAgent />} />
           <Route path="/developer" element={<DeveloperAgent />} />
           <Route path="/documents" element={<Documents />} />
+          <Route path="/conversations" element={<Conversations />} />
+          <Route path="/conversations/:conversationId" element={<ConversationDetail />} />
         </Route>
 
         <Route path="*" element={<NotFound />} />

@@ -363,10 +363,13 @@ def test_every_agent_and_upload_route_declares_bearer_security() -> None:
     must_be_protected = [
         path
         for path in spec["paths"]
-        if path.startswith(("/api/content/", "/api/developer/", "/api/ai/"))
+        if path.startswith(
+            ("/api/content/", "/api/developer/", "/api/ai/", "/api/conversations")
+        )
         or path == "/api/documents/upload"
     ]
-    assert len(must_be_protected) == 16
+    # 7 content + 7 developer + 1 ai + 1 upload + 3 conversation paths
+    assert len(must_be_protected) == 19
 
     unprotected = [
         f"{method.upper()} {path}"
