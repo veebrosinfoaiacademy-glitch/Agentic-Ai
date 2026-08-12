@@ -153,6 +153,92 @@ working when it expires or its account is deleted.
 
 ---
 
+## Production deployment
+
+**Not yet deployed.** The configuration below is written and verified locally
+in production mode; no hosted instance exists.
+
+```
+                Internet
+                   │  HTTPS
+        ┌──────────┴──────────┐
+        │  Vercel (static)    │   React bundle, CDN-served
+        └──────────┬──────────┘
+                   │  fetch, CORS-restricted
+        ┌──────────┴──────────┐
+        │  Render (web svc)   │   FastAPI + uvicorn
+        └──────────┬──────────┘
+            ┌──────┴───────┐
+        MongoDB Atlas    Groq API
+```
+
+**Why this shape.** Render runs FastAPI from `requirements.txt` with no
+container to maintain, gives HTTPS and a health check on the free tier, and
+deploys from GitHub. Vercel serves a Vite build as static files, so the
+frontend has no server to run at all. Both keep secrets in their dashboard
+rather than in git. Atlas and Groq are already in use and unchanged.
+
+### Deploying the backend (Render)
+
+`render.yaml` is a blueprint — point Render at the repository and it reads it.
+
+- Root directory: `backend`
+- Build: `pip install -r requirements.txt`
+- Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (never `--reload`)
+- Health check path: `/api/health`
+
+Set these in the dashboard (they are `sync: false` in the blueprint, so no
+value is ever committed):
+
+| Variable | Notes |
+|---|---|
+| `GROQ_API_KEY` | From console.groq.com |
+| `MONGODB_URI` | Atlas connection string |
+| `JWT_SECRET` | Render can generate it; 32+ bytes |
+| `CORS_ORIGINS` | Exactly the deployed frontend origin |
+
+### Deploying the frontend (Vercel)
+
+- Root directory: `frontend`
+- Build: `npm run build`, output `dist`
+- Set `VITE_API_BASE_URL` to the Render URL plus `/api`
+
+The build **fails deliberately** if `VITE_API_BASE_URL` is missing, rather
+than silently shipping a bundle pointed at localhost.
+
+### CORS
+
+Development allows `http://localhost:5173`. Production must be set to the
+deployed frontend origin only. Never `*` — it is invalid alongside
+credentials and would let any site call the API with a user's token.
+
+### MongoDB Atlas
+
+Render's free tier uses dynamic outbound IPs, so Atlas Network Access needs
+`0.0.0.0/0`. That is a real trade-off: the cluster is reachable from any
+address, and only the database credentials protect it. Mitigations are a
+strong generated password, a least-privilege user scoped to this database,
+and rotating the credential if it is ever exposed. A static outbound IP
+(Render paid tier) or Atlas Private Endpoint removes the trade-off.
+
+### After deploying
+
+1. `GET /api/health` returns 200 with `database.connected: true`
+2. Register, log in, and confirm `/api/auth/me`
+3. Confirm the browser can reach the API (CORS) from the real frontend origin
+4. Confirm `X-Request-ID` appears on responses
+
+Free-tier Render sleeps after inactivity, so the first request after an idle
+period takes several seconds. That affects the demo, not correctness.
+
+### CI
+
+`.github/workflows/ci.yml` runs on every push and PR: backend `pytest`,
+frontend lint/test/build, and a secret scan. It needs no secrets — the test
+suite fakes MongoDB and Groq, so CI never touches Atlas or spends quota.
+
+---
+
 ## Progress
 
 - [x] **Phase 1** — Project setup
@@ -167,5 +253,5 @@ working when it expires or its account is deleted.
 - [x] **Phase 10** — Protected AI/document APIs, JWT-derived identity
 - [x] **Phase 11** — Conversation history and persistent AI sessions
 - [ ] Phase 12 — Testing and error handling
-- [ ] Phase 13 — Deployment
+- [x] **Phase 15** — Production deployment configuration (not yet deployed)
 - [ ] Phase 14 — Documentation
