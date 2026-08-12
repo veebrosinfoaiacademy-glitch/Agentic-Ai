@@ -66,6 +66,22 @@ def test_unknown_route_uses_error_envelope() -> None:
     assert body["error"]["code"] == "NOT_FOUND"
 
 
+def test_malformed_json_body_names_the_body_not_an_offset() -> None:
+    """Pydantic reports a character offset for unparseable JSON.
+
+    Passing that through as `field: "103"` would be meaningless to a client.
+    """
+    response = client.post(
+        "/api/ai/test",
+        content='{"prompt": "unterminated',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["error"]["details"][0]
+    assert detail["field"] == "body"
+
+
 def test_openapi_schema_is_available() -> None:
     """Swagger's underlying schema is served and includes the health route."""
     response = client.get("/openapi.json")

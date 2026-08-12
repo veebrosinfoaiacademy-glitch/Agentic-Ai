@@ -11,12 +11,10 @@ It then calls the shared Groq service and validates what comes back. It never
 imports the Groq SDK, never touches MongoDB, and never knows about HTTP.
 """
 
-import json
 import logging
-import re
 from dataclasses import dataclass, field
 
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, field_validator
 
 from app.prompts.content_prompts import (
     AUDIENCE_ADAPTATION_PROMPT,
@@ -43,7 +41,7 @@ from app.schemas.content_schemas import (
     Tone,
 )
 from app.services.groq_service import groq_service
-from app.utils.errors import AppError
+from app.utils.ai_output import coerce_string_list, parse_structured
 
 logger = logging.getLogger("app.agents.content")
 
@@ -108,24 +106,7 @@ class _ExtractionPayload(BaseModel):
     @field_validator("entities", "key_points", "facts", "keywords", mode="before")
     @classmethod
     def coerce_items(cls, value: object) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [value]
-        if not isinstance(value, list):
-            return []
-
-        items: list[str] = []
-        for item in value:
-            if isinstance(item, str):
-                text = item
-            elif isinstance(item, dict):
-                text = " - ".join(str(v) for v in item.values() if v)
-            else:
-                text = str(item)
-            if text.strip():
-                items.append(text.strip())
-        return items
+        return coerce_string_list(value)
 
 
 class ContentAgent:
@@ -262,62 +243,13 @@ class ContentAgent:
 
     # --- Output parsing -----------------------------------------------------
 
-    @staticmethod
-    def _strip_code_fences(raw: str) -> str:
-        """Remove ```json ... ``` wrappers some models add despite instructions."""
-        fenced = re.match(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", raw, re.DOTALL)
-        return fenced.group(1) if fenced else raw.strip()
-
     def _parse_extraction(self, raw: str) -> dict[str, list[str]]:
         """Turn the model's reply into a validated dict.
 
-        Raises AppError rather than returning half-parsed data — a caller
-        that receives `{}` cannot tell "nothing found" from "parsing broke".
+        Fence stripping, brace recovery and validation all live in
+        utils.ai_output so the Developer Agent behaves identically.
         """
-        candidate = self._strip_code_fences(raw)
-
-        # Some models still prepend a sentence. Fall back to the outermost
-        # braces before giving up.
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            start, end = candidate.find("{"), candidate.rfind("}")
-            if start == -1 or end <= start:
-                logger.error("Extraction returned no JSON object")
-                raise AppError(
-                    code="AI_INVALID_OUTPUT",
-                    message="AI returned an unexpected format. Please try again.",
-                    status_code=502,
-                ) from None
-            try:
-                parsed = json.loads(candidate[start : end + 1])
-            except json.JSONDecodeError:
-                logger.error("Extraction returned malformed JSON")
-                raise AppError(
-                    code="AI_INVALID_OUTPUT",
-                    message="AI returned an unexpected format. Please try again.",
-                    status_code=502,
-                ) from None
-
-        if not isinstance(parsed, dict):
-            logger.error("Extraction returned %s, expected an object", type(parsed).__name__)
-            raise AppError(
-                code="AI_INVALID_OUTPUT",
-                message="AI returned an unexpected format. Please try again.",
-                status_code=502,
-            )
-
-        try:
-            payload = _ExtractionPayload.model_validate(parsed)
-        except ValidationError:
-            logger.error("Extraction JSON failed schema validation")
-            raise AppError(
-                code="AI_INVALID_OUTPUT",
-                message="AI returned an unexpected format. Please try again.",
-                status_code=502,
-            ) from None
-
-        return payload.model_dump()
+        return parse_structured(_ExtractionPayload, raw, "extraction").model_dump()
 
 
 # Single shared instance, matching the mongodb / groq_service pattern.

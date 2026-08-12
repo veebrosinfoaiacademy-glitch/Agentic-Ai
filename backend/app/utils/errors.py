@@ -66,6 +66,19 @@ def _code_for_status(status_code: int) -> str:
     return _STATUS_CODE_NAMES.get(status_code, "HTTP_ERROR")
 
 
+def _field_name(err: dict) -> str:
+    """Name the field a validation error refers to.
+
+    When the body is not valid JSON at all, Pydantic reports the location as
+    a character offset, e.g. ("body", 103). Reporting `field: "103"` to a
+    client is meaningless — there is no field 103 — so the whole body is
+    named instead.
+    """
+    if err.get("type") == "json_invalid":
+        return "body"
+    return ".".join(str(part) for part in err.get("loc", []) if part != "body")
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach all error handlers to the FastAPI application."""
 
@@ -100,10 +113,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         [{field, message}] list that is easy to render next to a form input.
         """
         details = [
-            {
-                "field": ".".join(str(part) for part in err.get("loc", []) if part != "body"),
-                "message": err.get("msg", "Invalid value"),
-            }
+            {"field": _field_name(err), "message": err.get("msg", "Invalid value")}
             for err in exc.errors()
         ]
         logger.warning("Validation failed: %s", details)
