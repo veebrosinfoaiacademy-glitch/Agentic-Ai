@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import mongodb
 from app.routes import api_router
+from app.services.groq_service import groq_service
 from app.utils.errors import register_exception_handlers
 
 # Root stays at INFO. Setting the root logger to DEBUG would also switch on
@@ -65,8 +66,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # the truth about what actually connected.
     mongodb.connect()
 
+    # The Groq client is created lazily on first use rather than here, so a
+    # missing key cannot block startup. We only need to close it on the way out.
+    if groq_service.is_configured:
+        logger.info("Groq configured - model '%s'", groq_service.model)
+
     yield
 
+    groq_service.close()
     mongodb.close()
     logger.info("%s shutting down", settings.APP_NAME)
 

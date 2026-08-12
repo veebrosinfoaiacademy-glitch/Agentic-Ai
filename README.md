@@ -93,8 +93,8 @@ git-ignored — never commit it.
 
 - [x] **Phase 1** — Project setup
 - [x] **Phase 2** — FastAPI backend foundation (config, CORS, error handling, health, tests)
-- [ ] Phase 3 — MongoDB Atlas + PyMongo
-- [ ] Phase 4 — Groq API integration
+- [x] **Phase 3** — MongoDB Atlas + PyMongo (pending real Atlas credentials)
+- [x] **Phase 4** — Groq API integration (pending a real API key)
 - [ ] Phase 5 — Content Agent
 - [ ] Phase 6 — Developer Productivity Agent
 - [ ] Phase 7 — Document upload and processing

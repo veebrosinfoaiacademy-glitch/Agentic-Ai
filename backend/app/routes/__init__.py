@@ -7,10 +7,11 @@ main.py never has to be touched again.
 
 from fastapi import APIRouter
 
-from app.routes import health
+from app.routes import ai, health
 
 api_router = APIRouter()
 api_router.include_router(health.router)
+api_router.include_router(ai.router, prefix="/ai")
 
 # Later phases will add:
 #   api_router.include_router(auth.router, prefix="/auth")

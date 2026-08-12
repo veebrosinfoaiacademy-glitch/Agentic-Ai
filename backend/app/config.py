@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str | None = None
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
+    # Transport settings — infrastructure concerns, so they belong here.
+    # Sampling settings like temperature and max tokens are NOT here: those
+    # are per-task decisions each agent makes (a code reviewer wants low
+    # temperature, a blog writer wants higher), so they are method arguments.
+    GROQ_TIMEOUT_SECONDS: float = 30.0
+    GROQ_MAX_RETRIES: int = 2
+
     # ---- MongoDB Atlas (required from Phase 3 onwards) ----
     MONGODB_URI: str | None = None
     MONGODB_DB_NAME: str = "ai_productivity_agents"

@@ -108,7 +108,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         ]
         logger.warning("Validation failed: %s", details)
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            # Starlette renamed HTTP_422_UNPROCESSABLE_ENTITY to
+            # ..._UNPROCESSABLE_CONTENT and deprecated the old name.
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content=error(
                 code="VALIDATION_ERROR",
                 message="Invalid request data",
