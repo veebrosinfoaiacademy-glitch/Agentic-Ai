@@ -5,7 +5,6 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "comment": "The app is a client-side SPA: every unknown path must serve index.html so a deep link like /conversations/<id> reaches React Router instead of 404ing at the CDN.",
       "source": "/((?!assets/).*)",
       "destination": "/index.html"
     }
