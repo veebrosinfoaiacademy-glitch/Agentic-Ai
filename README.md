@@ -195,13 +195,13 @@ value is ever committed):
 | `GROQ_API_KEY` | From console.groq.com |
 | `MONGODB_URI` | Atlas connection string |
 | `JWT_SECRET` | Render can generate it; 32+ bytes |
-| `CORS_ORIGINS` | Exactly the deployed frontend origin |
+| `CORS_ORIGINS` | Exactly the deployed frontend origin, for example `https://agentic-ai-phi-two.vercel.app` |
 
 ### Deploying the frontend (Vercel)
 
 - Root directory: `frontend`
 - Build: `npm run build`, output `dist`
-- Set `VITE_API_BASE_URL` to the Render URL plus `/api`
+- Set `VITE_API_BASE_URL` to the Render URL plus `/api`, for example `https://agentic-ai-zhln.onrender.com/api`
 
 The build **fails deliberately** if `VITE_API_BASE_URL` is missing, rather
 than silently shipping a bundle pointed at localhost.
