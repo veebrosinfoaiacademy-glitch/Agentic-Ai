@@ -93,14 +93,17 @@ CONTENT_TYPE_GUIDANCE: dict[ContentType, str] = {
 
 SUMMARY_TYPE_GUIDANCE: dict[SummaryType, str] = {
     SummaryType.SHORT: (
-        "a single tight paragraph of 2-4 sentences capturing only the main point"
+        "a single tight paragraph of exactly 2-4 sentences capturing only the "
+        "main point. Do not use bullets or headings"
     ),
     SummaryType.DETAILED: (
-        "several paragraphs covering the main argument and its supporting points, "
-        "about a third the length of the source"
+        "a fuller summary with 2-4 short paragraphs when the source has enough "
+        "material. Cover the main argument and supporting points. For very short "
+        "source text, write at least 4 complete sentences instead of collapsing "
+        "the answer into fragments"
     ),
     SummaryType.BULLET_POINTS: (
-        "5-8 bullet points, one idea per bullet, each a complete sentence"
+        "5-8 markdown bullet points, one idea per bullet, each a complete sentence"
     ),
 }
 
@@ -281,9 +284,10 @@ def build_generation_prompt(
 def build_summarization_prompt(text: str, summary_type: SummaryType) -> str:
     """User message for summarization."""
     return (
+        f"Summary type: {summary_type.value}\n"
         f"Summary style: {SUMMARY_TYPE_GUIDANCE[summary_type]}\n\n"
         f"Source text:\n\"\"\"\n{text}\n\"\"\"\n\n"
-        "Write the summary now."
+        "Write the summary now. Follow the requested summary type exactly."
     )
 
 

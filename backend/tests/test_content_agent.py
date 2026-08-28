@@ -135,7 +135,9 @@ def test_summarization_prompt_carries_source_and_style(
 
     prompt = recorded_generate.user_prompt
     assert SOURCE in prompt
+    assert "Summary type: bullet_points" in prompt
     assert content_prompts.SUMMARY_TYPE_GUIDANCE[SummaryType.BULLET_POINTS] in prompt
+    assert "Follow the requested summary type exactly" in prompt
 
 
 def test_rewrite_prompt_carries_source_and_instructions(
