@@ -47,7 +47,7 @@ services:
       # Must be the deployed frontend origin. Never "*" — that is invalid
       # with credentials and would open the API to any site.
       - key: CORS_ORIGINS
-        value: https://agentic-ai-phi-two.vercel.app
+        sync: false
       - key: AI_RATE_LIMIT_PER_HOUR
         value: "100"
       - key: AI_RATE_LIMIT_PER_DAY
